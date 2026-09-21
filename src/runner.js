@@ -20,8 +20,15 @@ class JobRunner {
     this.child = null;
   }
 
-  cancel() {
+  // `reportResult`: true when this is an operator-initiated stop
+  // (daemon.js's stop(), via `thub-client stop`) rather than a
+  // Coordinator-driven `cancel-job` command — in the latter case the
+  // Coordinator already transitioned the job itself (§5.1), so posting a
+  // result here would be redundant; in the former, nobody else will ever
+  // tell the Coordinator this job stopped, so this runner has to.
+  cancel(reportResult = false) {
     this.canceled = true;
+    this.reportResult = reportResult;
     if (this.child) {
       this.child.kill('SIGTERM');
       setTimeout(() => {
@@ -51,16 +58,16 @@ class JobRunner {
       const fwPath = await downloadFirmware(job.spec, jobDir, this.config.artifactory);
       logShipper.push('runner', `downloading tests ${job.spec.tests.url}`);
       const testsDir = await downloadAndExtractTests(job.spec, jobDir, this.config.artifactory);
-      if (this.canceled) return this._bail(executor, logShipper);
+      if (this.canceled) return this._bail(job, executor, logShipper);
 
       logShipper.push('runner', 'preparing DUT');
       await executor.prepare(job, job.spec.target.type === 'hw' ? fwPath : path.dirname(fwPath));
-      if (this.canceled) return this._bail(executor, logShipper);
+      if (this.canceled) return this._bail(job, executor, logShipper);
 
       await this.client.post(`/jobs/${job.id}/state`, { state: JOB_STATES.RUNNING });
 
       const exitCode = await this._runTests(job, testsDir, executor, logShipper);
-      if (this.canceled) return this._bail(executor, logShipper);
+      if (this.canceled) return this._bail(job, executor, logShipper);
 
       const artifactsDir = path.join(testsDir, 'artifacts');
       const resultFiles = collectResultFiles(testsDir, artifactsDir);
@@ -85,9 +92,21 @@ class JobRunner {
     }
   }
 
-  async _bail(executor, logShipper) {
+  async _bail(job, executor, logShipper) {
     await executor.teardown().catch(() => {});
+    await this._reportStoppedIfNeeded(job.id);
     await logShipper.stop();
+  }
+
+  async _reportStoppedIfNeeded(jobId) {
+    if (!this.reportResult) return;
+    await this.client
+      .post(`/jobs/${jobId}/result`, {
+        state: JOB_STATES.ERROR,
+        exitCode: null,
+        summary: { error: 'Client stopped by operator (thub-client stop)' },
+      })
+      .catch(() => {});
   }
 
   // Dry run (§7.1): walks the same job lifecycle and API calls as a real
@@ -100,7 +119,7 @@ class JobRunner {
   async _runDryRun(job, jobDir, logShipper) {
     try {
       await this.client.post(`/jobs/${job.id}/accept`);
-      if (this.canceled) return;
+      if (this.canceled) return this._reportStoppedIfNeeded(job.id);
 
       logShipper.push('runner', '[dry-run] no commands will be executed on this Client');
       logShipper.push(
@@ -122,12 +141,12 @@ class JobRunner {
       for (const [key, value] of Object.entries(metaToEnv(job.spec.meta))) {
         logShipper.push('runner', `[dry-run] ${key}=${value}`);
       }
-      if (this.canceled) return;
+      if (this.canceled) return this._reportStoppedIfNeeded(job.id);
 
       await this.client.post(`/jobs/${job.id}/state`, { state: JOB_STATES.RUNNING });
       logShipper.push('runner', '[dry-run] simulating test run...');
       await sleep(500);
-      if (this.canceled) return;
+      if (this.canceled) return this._reportStoppedIfNeeded(job.id);
 
       logShipper.push('runner', '[dry-run] done — no real verdict; reporting PASSED');
       const reportPath = path.join(jobDir, 'dry-run-report.txt');

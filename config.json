@@ -19,7 +19,7 @@
     "power": { "method": "uhubctl", "hub": "1-1", "port": 2 }
   },
   "sw": {
-    "image": "registry.example.com/dut-emulator:2026.08",
+    "image": "dockerhub.io/ubuntu:minimal",
     "cpus": 1,
     "memory": "100m"
   }

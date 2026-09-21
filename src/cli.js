@@ -1,9 +1,17 @@
 #!/usr/bin/env node
 'use strict';
 
+const fs = require('node:fs');
+const path = require('node:path');
+const { spawn } = require('node:child_process');
 const { Command } = require('commander');
 const { loadConfig } = require('./config');
 const { sendCommand } = require('./control-socket');
+
+const DAEMON_ENTRY = path.join(__dirname, 'daemon.js');
+// Bounded by runner.js's KILL_GRACE_MS (10s) for an active job's SIGTERM
+// -> SIGKILL, plus teardown overhead — see daemon.js's stop().
+const STOP_TIMEOUT_MS = 20_000;
 
 // §8.4: "sudo thub-client lock --reason ... / sudo thub-client unlock"
 const program = new Command();
@@ -11,6 +19,63 @@ program.name('thub-client').description('Control the local thub-client daemon');
 
 function socketPath() {
   return loadConfig().socketPath;
+}
+
+function readPid(pidFile) {
+  try {
+    const pid = Number(fs.readFileSync(pidFile, 'utf8').trim());
+    return Number.isInteger(pid) && pid > 0 ? pid : null;
+  } catch {
+    return null;
+  }
+}
+
+function isAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function waitUntil(predicate, timeoutMs, intervalMs = 200) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await predicate()) return true;
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  return false;
+}
+
+// Stops the daemon by pidfile + SIGTERM rather than over the control
+// socket, so it still works even if the socket itself is wedged. SIGTERM
+// triggers the same graceful shutdown as Ctrl-C: finish any active job,
+// then exit (daemon.js's stop()/start()).
+async function stopDaemon(config) {
+  const pid = readPid(config.pidFile);
+  if (!pid || !isAlive(pid)) {
+    console.log('Not running.');
+    return true;
+  }
+  process.kill(pid, 'SIGTERM');
+  const exited = await waitUntil(() => !isAlive(pid), STOP_TIMEOUT_MS);
+  if (!exited) {
+    console.error(`Timed out waiting for pid ${pid} to stop (still running after ${STOP_TIMEOUT_MS / 1000}s).`);
+    return false;
+  }
+  console.log(`Stopped (pid ${pid}).`);
+  return true;
+}
+
+function startDaemon(config) {
+  const child = spawn(process.execPath, [DAEMON_ENTRY], {
+    detached: true,
+    stdio: 'ignore',
+    env: { ...process.env, THUB_CLIENT_CONFIG: config.configPath },
+  });
+  child.unref();
+  return child.pid;
 }
 
 program
@@ -39,6 +104,34 @@ program
     const res = await sendCommand(socketPath(), { cmd: 'status' });
     console.log(JSON.stringify(res, null, 2));
     process.exit(res.ok ? 0 : 1);
+  });
+
+program
+  .command('stop')
+  .description('Gracefully stop the daemon (finishes an active job first, then exits)')
+  .action(async () => {
+    const ok = await stopDaemon(loadConfig());
+    process.exit(ok ? 0 : 1);
+  });
+
+program
+  .command('restart')
+  .description('Stop the daemon (if running) and start a new one with the same config')
+  .action(async () => {
+    const config = loadConfig();
+    const stopped = await stopDaemon(config);
+    if (!stopped) process.exit(1);
+
+    const pid = startDaemon(config);
+    // Give it a moment to crash on a startup error (bad config, port in
+    // use, etc.) before declaring victory — spawn() returning doesn't mean
+    // the new process is actually going to stay up.
+    await new Promise((resolve) => setTimeout(resolve, 750));
+    if (!isAlive(pid)) {
+      console.error(`New process (pid ${pid}) exited immediately — check its logs.`);
+      process.exit(1);
+    }
+    console.log(`Restarted (pid ${pid}).`);
   });
 
 program.parseAsync(process.argv);

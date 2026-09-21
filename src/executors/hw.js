@@ -1,6 +1,8 @@
 'use strict';
 
 const { spawn } = require('node:child_process');
+const { RelayClient } = require('../relay-client');
+const { assertSlotIndex } = require('../config');
 
 // §8.2 HW executor: flashes a physical DUT over ST-Link and exposes its
 // UART. Stable device paths come from udev rules (udev/99-thub.rules),
@@ -62,12 +64,29 @@ class HwExecutor {
       await run('uhubctl', ['-l', this.config.power.hub, '-p', String(this.config.power.port), '-a', 'cycle']).catch(
         () => {}
       );
+    } else if (this.config.power?.method === 'relay') {
+      await this._relayCycle().catch((err) => this.logShipper.push('flash', `relay cycle failed: ${err.message}`));
     }
     if (this.serialPort?.isOpen) {
       await new Promise((resolve) => this.serialPort.close(resolve));
     }
     this.serialPort = null;
   }
+
+  // STUB power control via a relay board's REST API — see relay-client.js.
+  async _relayCycle() {
+    const { relayIndex, baseUrl } = this.config.power;
+    assertSlotIndex('hw.power.relayIndex', relayIndex);
+    const relay = new RelayClient(baseUrl);
+    this.logShipper.push('flash', `relay: power-cycling channel ${relayIndex} via ${relay.baseUrl}`);
+    await relay.setRelay(relayIndex, false);
+    await sleep(500);
+    await relay.setRelay(relayIndex, true);
+  }
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 module.exports = { HwExecutor };
