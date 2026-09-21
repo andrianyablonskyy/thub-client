@@ -1,5 +1,6 @@
 'use strict';
 
+const fs = require('node:fs');
 const { loadConfig, readCredentials, writeCredentials } = require('./config');
 const { ClientApiClient } = require('./api-client');
 const { createControlSocketServer } = require('./control-socket');
@@ -17,12 +18,35 @@ class Daemon {
     this.activeJobId = null;
     this.runner = null;
     this.stopped = false;
+    this.controlServer = null;
+    this.heartbeatTimer = null;
+    this.heartbeatInFlight = false;
+    this.pollAbort = null;
   }
 
+  // Resolves once the daemon has actually shut down (loop exited, control
+  // socket closed, pidfile removed) — `thub-client stop`/`restart` (§8.4)
+  // send SIGTERM and wait for the process to exit, so this has to be a
+  // real, awaited shutdown rather than a fire-and-forget flag flip.
   async start() {
     await this._ensureRegistered();
+    this._writePidFile();
     this._startControlSocket();
-    this._loop();
+    this._startHeartbeatTimer();
+    await this._workLoop();
+    clearInterval(this.heartbeatTimer);
+    this._cleanup();
+  }
+
+  _writePidFile() {
+    fs.mkdirSync(require('node:path').dirname(this.config.pidFile), { recursive: true });
+    fs.writeFileSync(this.config.pidFile, String(process.pid));
+  }
+
+  _cleanup() {
+    this.controlServer?.close();
+    fs.rmSync(this.config.pidFile, { force: true });
+    fs.rmSync(this.config.socketPath, { force: true });
   }
 
   async _ensureRegistered() {
@@ -51,7 +75,7 @@ class Daemon {
   }
 
   _startControlSocket() {
-    createControlSocketServer(this.config.socketPath, {
+    this.controlServer = createControlSocketServer(this.config.socketPath, {
       lock: async ({ reason }) => {
         this.localLock = { locked: true, reason: reason || null };
         await this._reportStatus();
@@ -79,17 +103,45 @@ class Daemon {
     });
   }
 
-  async _loop() {
+  // Heartbeats run on their own timer, independent of whatever the work
+  // loop below is doing. They used to be interleaved with it (heartbeat,
+  // then poll-or-run-job, repeat), which meant a job that ran longer than
+  // `missedLimit * heartbeatIntervalSec` (§5.1) got no heartbeats sent
+  // for its whole duration — the Coordinator's sweeper would eventually
+  // and incorrectly mark the resource OUT_OF_SERVICE and the job LOST,
+  // and a `cancel-job` command could never reach an in-progress job
+  // either, since heartbeat responses are the only way commands arrive.
+  _startHeartbeatTimer() {
+    const tick = () => {
+      if (this.heartbeatInFlight) return; // don't pile up if one's slow
+      this.heartbeatInFlight = true;
+      this._heartbeat()
+        .catch((err) => console.error('heartbeat error:', err.message))
+        .finally(() => {
+          this.heartbeatInFlight = false;
+        });
+    };
+    tick(); // fire immediately — setInterval alone would leave a freshly
+    // (re)started daemon looking OUT_OF_SERVICE/stale for up to a full
+    // heartbeatIntervalSec before its first heartbeat.
+    this.heartbeatTimer = setInterval(tick, this.config.heartbeatIntervalSec * 1000);
+    this.heartbeatTimer.unref?.();
+  }
+
+  // Long-polls for work when idle and unlocked, or just runs a job to
+  // completion when one comes in. Separate from the heartbeat timer above
+  // so a slow/long job never starves heartbeats.
+  async _workLoop() {
     while (!this.stopped) {
+      if (this.localLock.locked) {
+        await sleep(1000);
+        continue;
+      }
       try {
-        await this._heartbeat();
-        if (!this.activeJobId && !this.localLock.locked) {
-          await this._pollForJob();
-        } else {
-          await sleep(this.config.heartbeatIntervalSec * 1000);
-        }
+        await this._pollForJob();
       } catch (err) {
-        console.error('daemon loop error:', err.message);
+        if (this.stopped) break; // aborted on purpose by stop()
+        console.error('poll error:', err.message);
         await sleep(this.config.heartbeatIntervalSec * 1000);
       }
     }
@@ -112,9 +164,16 @@ class Daemon {
   }
 
   async _pollForJob() {
-    const job = await this.client.get(`/resources/${this.resourceId}/jobs/next`, {
-      query: { wait: this.config.longPollWaitSec },
-    });
+    this.pollAbort = new AbortController();
+    let job;
+    try {
+      job = await this.client.get(`/resources/${this.resourceId}/jobs/next`, {
+        query: { wait: this.config.longPollWaitSec },
+        signal: this.pollAbort.signal,
+      });
+    } finally {
+      this.pollAbort = null;
+    }
     if (!job) return;
 
     this.activeJobId = job.id;
@@ -127,8 +186,19 @@ class Daemon {
     }
   }
 
+  // Bounded, "stop means stop" shutdown (matching `docker stop` / systemd's
+  // TimeoutStopSec, not "wait however long the job takes"): abort the
+  // in-flight long-poll if idle, or if a job is running, tell the runner
+  // to cancel it AND report it ERROR (runner.js's cancel(true)/_bail) —
+  // properly awaited as part of runner.run(), which _pollForJob() and
+  // therefore start() await, so the result POST actually completes before
+  // process.exit(0) runs instead of racing it. Note this ends up posting
+  // /jobs/:id/result, not /jobs/:id/cancel — cancel is an agent/admin
+  // action (§12); a resource token isn't authorized to call it.
   stop() {
     this.stopped = true;
+    this.pollAbort?.abort();
+    this.runner?.cancel(true);
   }
 }
 
@@ -139,10 +209,13 @@ function sleep(ms) {
 if (require.main === module) {
   const config = loadConfig();
   const daemon = new Daemon(config);
-  daemon.start().catch((err) => {
-    console.error('Fatal:', err.message);
-    process.exit(1);
-  });
+  daemon
+    .start()
+    .then(() => process.exit(0))
+    .catch((err) => {
+      console.error('Fatal:', err.message);
+      process.exit(1);
+    });
   process.on('SIGTERM', () => daemon.stop());
   process.on('SIGINT', () => daemon.stop());
 }
