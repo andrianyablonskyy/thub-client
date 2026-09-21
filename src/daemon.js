@@ -182,6 +182,7 @@ class Daemon {
     }
     if (!job) return;
 
+    console.log(`Job ${job.id} queued`);
     this.activeJobId = job.id;
     this.runner = new JobRunner(this.client, this.config);
     try {
