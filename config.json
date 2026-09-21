@@ -1,7 +1,7 @@
 {
   "coordinatorUrl": "http://localhost:8000",
-  "name": "lab-sw-01",
-  "type": "sw",
+  "name": "lab-HIL-01",
+  "type": "hw",
   "labels": [],
   "joinKey": "change-me-to-a-long-random-string",
   "tokenFile": "./.data/dut0.token",
@@ -20,7 +20,7 @@
   },
   "sw": {
     "image": "registry.example.com/dut-emulator:2026.08",
-    "cpus": 2,
-    "memory": "2g"
+    "cpus": 1,
+    "memory": "100m"
   }
 }

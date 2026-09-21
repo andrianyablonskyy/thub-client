@@ -91,7 +91,7 @@ class JobRunner {
       const args = ['--suite', job.spec.tests.suite || 'default', ...(job.spec.tests.args || [])];
       this.child = spawn(entry, args, {
         cwd: testsDir,
-        env: { ...process.env, ...executor.envFor() },
+        env: { ...process.env, ...executor.envFor(), ...metaToEnv(job.spec.meta) },
       });
       this.child.stdout.on('data', (d) => logShipper.push('runner', d.toString('utf8').trimEnd()));
       this.child.stderr.on('data', (d) => logShipper.push('runner', d.toString('utf8').trimEnd()));
@@ -102,6 +102,22 @@ class JobRunner {
       });
     });
   }
+}
+
+// Exposes `--meta key=value` from the Agent (§7.1 — CI job id, git repo/
+// branch/sha/tag, etc.) to run-tests.sh as THUB_META_<KEY> env vars, e.g.
+// `--meta ciJobId=123` -> THUB_META_CI_JOB_ID=123.
+function metaToEnv(meta) {
+  const env = {};
+  for (const [key, value] of Object.entries(meta || {})) {
+    if (typeof value !== 'string' && typeof value !== 'number' && typeof value !== 'boolean') continue;
+    const envKey = key
+      .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+      .replace(/[^A-Za-z0-9]+/g, '_')
+      .toUpperCase();
+    env[`THUB_META_${envKey}`] = String(value);
+  }
+  return env;
 }
 
 function collectResultFiles(testsDir, artifactsDir) {
