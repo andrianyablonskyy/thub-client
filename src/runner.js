@@ -34,6 +34,11 @@ class JobRunner {
     const jobDir = path.join(this.config.workDir, job.id);
     fs.mkdirSync(jobDir, { recursive: true });
     const logShipper = new LogShipper(this.client, job.id, this.config);
+
+    if (job.spec.dryRun) {
+      return this._runDryRun(job, jobDir, logShipper);
+    }
+
     const executor =
       job.spec.target.type === 'hw'
         ? new HwExecutor(this.config, logShipper)
@@ -83,6 +88,68 @@ class JobRunner {
   async _bail(executor, logShipper) {
     await executor.teardown().catch(() => {});
     await logShipper.stop();
+  }
+
+  // Dry run (§7.1): walks the same job lifecycle and API calls as a real
+  // job — accept, PREPARING/RUNNING transitions, log lines, an artifact,
+  // a result — but never downloads firmware/tests, never touches an
+  // executor (no Docker, no ST-Link/serial), and never spawns run-tests.sh.
+  // Useful for proving the Coordinator<->Client plumbing end-to-end
+  // without needing real hardware, a real emulator image, or a real
+  // Artifactory.
+  async _runDryRun(job, jobDir, logShipper) {
+    try {
+      await this.client.post(`/jobs/${job.id}/accept`);
+      if (this.canceled) return;
+
+      logShipper.push('runner', '[dry-run] no commands will be executed on this Client');
+      logShipper.push(
+        'runner',
+        `[dry-run] target: ${job.spec.target.type} labels=${(job.spec.target.labels || []).join(',') || '(none)'}`
+      );
+      logShipper.push(
+        'runner',
+        `[dry-run] would download firmware ${job.spec.firmware.url}` +
+          (job.spec.firmware.sha256 ? ` (sha256 ${job.spec.firmware.sha256})` : '')
+      );
+      logShipper.push('runner', `[dry-run] would download tests ${job.spec.tests.url}`);
+      const suite = job.spec.tests.suite || 'default';
+      const args = job.spec.tests.args || [];
+      logShipper.push(
+        'runner',
+        `[dry-run] would run: run-tests.sh --suite ${suite}${args.length ? ' ' + args.join(' ') : ''}`
+      );
+      for (const [key, value] of Object.entries(metaToEnv(job.spec.meta))) {
+        logShipper.push('runner', `[dry-run] ${key}=${value}`);
+      }
+      if (this.canceled) return;
+
+      await this.client.post(`/jobs/${job.id}/state`, { state: JOB_STATES.RUNNING });
+      logShipper.push('runner', '[dry-run] simulating test run...');
+      await sleep(500);
+      if (this.canceled) return;
+
+      logShipper.push('runner', '[dry-run] done — no real verdict; reporting PASSED');
+      const reportPath = path.join(jobDir, 'dry-run-report.txt');
+      fs.writeFileSync(reportPath, dryRunReport(job));
+      await this.client.postArtifacts(job.id, [reportPath]);
+
+      await this.client.post(`/jobs/${job.id}/result`, {
+        state: JOB_STATES.PASSED,
+        exitCode: 0,
+        summary: { total: 0, passed: 0, failed: 0, skipped: 0, dryRun: true },
+      });
+    } catch (err) {
+      logShipper.push('runner', `ERROR: ${err.message}`);
+      if (!this.canceled) {
+        await this.client
+          .post(`/jobs/${job.id}/result`, { state: JOB_STATES.ERROR, exitCode: null, summary: { error: err.message } })
+          .catch(() => {});
+      }
+    } finally {
+      await logShipper.stop();
+      fs.rmSync(jobDir, { recursive: true, force: true });
+    }
   }
 
   _runTests(job, testsDir, executor, logShipper) {
@@ -148,6 +215,21 @@ function summarizeJUnit(xmlFiles) {
     }
   }
   return { total, passed: Math.max(total - failed - skipped, 0), failed, skipped };
+}
+
+function dryRunReport(job) {
+  return (
+    `TestHub dry run — no commands were executed on this Client.\n\n` +
+    `job:      ${job.id}\n` +
+    `target:   ${job.spec.target.type} labels=${(job.spec.target.labels || []).join(',') || '(none)'}\n` +
+    `firmware: ${job.spec.firmware.url}\n` +
+    `tests:    ${job.spec.tests.url} (suite=${job.spec.tests.suite || 'default'})\n` +
+    `meta:     ${JSON.stringify(job.spec.meta || {})}\n`
+  );
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 module.exports = { JobRunner };
