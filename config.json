@@ -4,10 +4,6 @@
   "type": "hw",
   "labels": [],
   "joinKey": "change-me-to-a-long-random-string",
-  "tokenFile": "./.data/dut0.token",
-  "workDir": "./.data/work",
-  "socketPath": "/tmp/thub-client.sock",
-  "pidFile": "/tmp/thub-client.pid",
   "heartbeatIntervalSec": 10,
   "longPollWaitSec": 30,
   "artifactory": {
