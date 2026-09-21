@@ -2,6 +2,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const yaml = require('js-yaml');
 
 // Bundled with the package as a working example; a real Client overrides
@@ -55,6 +56,9 @@ function loadConfig(configPath = process.env.THUB_CLIENT_CONFIG) {
     workDir: raw.workDir || path.join(varDir, 'work', instance),
     socketPath: raw.socketPath || path.join(runDir, `${instance}.sock`),
     pidFile: raw.pidFile || path.join(runDir, `${instance}.pid`),
+    // Filename is literally .client-id; lives under a per-instance dir (not
+    // varDir directly) so 8 Client instances on one host don't share one.
+    clientIdFile: raw.clientIdFile || path.join(varDir, instance, '.client-id'),
     artifactory: resolveArtifactoryConfig(raw.artifactory || {}),
     hw,
     sw: raw.sw || {},
@@ -66,7 +70,27 @@ function loadConfig(configPath = process.env.THUB_CLIENT_CONFIG) {
   if (!config.coordinatorUrl || !config.name || !config.type) {
     throw new Error('Client config requires coordinatorUrl, name and type');
   }
+
+  // The Coordinator identifies this Client by this id (registry.registerAuto,
+  // §5.1), not by `name` — so `name`/`type`/`labels` can all be freely
+  // changed in this config and the Coordinator updates the same resource
+  // in place on the next restart, instead of registering a new one.
+  config.clientId = readOrCreateClientId(config.clientIdFile);
+
   return config;
+}
+
+function readOrCreateClientId(clientIdFile) {
+  try {
+    const id = fs.readFileSync(clientIdFile, 'utf8').trim();
+    if (id) return id;
+  } catch {
+    // fall through to generate one
+  }
+  const id = crypto.randomUUID();
+  fs.mkdirSync(path.dirname(clientIdFile), { recursive: true });
+  fs.writeFileSync(clientIdFile, id + '\n', { mode: 0o600 });
+  return id;
 }
 
 function assertSlotIndex(field, index) {
@@ -120,4 +144,12 @@ function writeCredentials(tokenFile, { resourceId, resourceToken }) {
   fs.writeFileSync(tokenFile, JSON.stringify({ resourceId, resourceToken }), { mode: 0o600 });
 }
 
-module.exports = { loadConfig, saveConfigField, readCredentials, writeCredentials, assertSlotIndex, MAX_SLOTS };
+module.exports = {
+  loadConfig,
+  saveConfigField,
+  readCredentials,
+  writeCredentials,
+  readOrCreateClientId,
+  assertSlotIndex,
+  MAX_SLOTS,
+};
