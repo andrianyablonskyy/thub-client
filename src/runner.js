@@ -37,6 +37,18 @@ class JobRunner {
     }
   }
 
+  // Mirrors what someone following the job through the Agent CLI or
+  // dashboard would see (§7.1) — state transitions and the final verdict —
+  // printed locally too, so the terminal running the daemon itself shows
+  // what it's doing instead of going silent for the whole job.
+  _announce(state) {
+    console.log(`-- ${state} on ${this.config.name} --`);
+  }
+
+  _announceFinished(state) {
+    console.log(`\nJob finished: ${state}`);
+  }
+
   async run(job) {
     const jobDir = path.join(this.config.workDir, job.id);
     fs.mkdirSync(jobDir, { recursive: true });
@@ -65,6 +77,7 @@ class JobRunner {
       if (this.canceled) return this._bail(job, executor, logShipper);
 
       await this.client.post(`/jobs/${job.id}/state`, { state: JOB_STATES.RUNNING });
+      this._announce(JOB_STATES.RUNNING);
 
       const exitCode = await this._runTests(job, testsDir, executor, logShipper);
       if (this.canceled) return this._bail(job, executor, logShipper);
@@ -78,12 +91,16 @@ class JobRunner {
       const summary = summarizeJUnit(resultFiles.filter((f) => f.endsWith('.xml')));
       const state = exitCode === 0 ? JOB_STATES.PASSED : JOB_STATES.FAILED;
       await this.client.post(`/jobs/${job.id}/result`, { state, exitCode, summary });
+      this._announce(state);
+      this._announceFinished(state);
     } catch (err) {
       logShipper.push('runner', `ERROR: ${err.message}`);
       if (!this.canceled) {
         await this.client
           .post(`/jobs/${job.id}/result`, { state: JOB_STATES.ERROR, exitCode: null, summary: { error: err.message } })
           .catch(() => {});
+        this._announce(JOB_STATES.ERROR);
+        this._announceFinished(JOB_STATES.ERROR);
       }
     } finally {
       await executor.teardown().catch(() => {});
@@ -100,6 +117,8 @@ class JobRunner {
 
   async _reportStoppedIfNeeded(jobId) {
     if (!this.reportResult) return;
+    this._announce(JOB_STATES.ERROR);
+    this._announceFinished(JOB_STATES.ERROR);
     await this.client
       .post(`/jobs/${jobId}/result`, {
         state: JOB_STATES.ERROR,
@@ -144,6 +163,7 @@ class JobRunner {
       if (this.canceled) return this._reportStoppedIfNeeded(job.id);
 
       await this.client.post(`/jobs/${job.id}/state`, { state: JOB_STATES.RUNNING });
+      this._announce(JOB_STATES.RUNNING);
       logShipper.push('runner', '[dry-run] simulating test run...');
       await sleep(500);
       if (this.canceled) return this._reportStoppedIfNeeded(job.id);
@@ -158,12 +178,16 @@ class JobRunner {
         exitCode: 0,
         summary: { total: 0, passed: 0, failed: 0, skipped: 0, dryRun: true },
       });
+      this._announce(JOB_STATES.PASSED);
+      this._announceFinished(JOB_STATES.PASSED);
     } catch (err) {
       logShipper.push('runner', `ERROR: ${err.message}`);
       if (!this.canceled) {
         await this.client
           .post(`/jobs/${job.id}/result`, { state: JOB_STATES.ERROR, exitCode: null, summary: { error: err.message } })
           .catch(() => {});
+        this._announce(JOB_STATES.ERROR);
+        this._announceFinished(JOB_STATES.ERROR);
       }
     } finally {
       await logShipper.stop();

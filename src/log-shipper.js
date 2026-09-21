@@ -20,9 +20,15 @@ class LogShipper {
     this.timer = setInterval(() => this._flush(), BATCH_INTERVAL_MS);
   }
 
+  // Every line also echoes to the daemon's own stdout, immediately — not
+  // just shipped to the Coordinator. Otherwise the terminal running
+  // `thub-client`/`npm run client` shows nothing at all while it's
+  // actually doing a job, and you'd have to go check the dashboard or the
+  // Agent CLI elsewhere just to see what your own machine is doing.
   push(stream, line) {
     for (const l of String(line).split('\n')) {
       if (l.length === 0) continue;
+      console.log(`[${stream}] ${l}`);
       this.queue.push({ ts: new Date().toISOString(), stream, line: l });
     }
   }
