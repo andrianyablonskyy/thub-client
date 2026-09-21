@@ -1,0 +1,8 @@
+# Stable device paths for TestHub HW Clients (README.md §8.2).
+# Replace the ID_SERIAL_SHORT values with each probe/board's actual serial.
+
+SUBSYSTEM=="tty", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="374b", \
+  ATTRS{serial}=="066DFF485550755187121234", SYMLINK+="thub/dut0-uart"
+
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="374b", \
+  ATTRS{serial}=="066DFF485550755187121234", SYMLINK+="thub/dut0-stlink"
