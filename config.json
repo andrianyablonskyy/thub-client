@@ -1,0 +1,26 @@
+{
+  "coordinatorUrl": "http://localhost:8000",
+  "name": "lab-sw-01",
+  "type": "sw",
+  "labels": [],
+  "joinKey": "change-me-to-a-long-random-string",
+  "tokenFile": "./.data/dut0.token",
+  "workDir": "./.data/work",
+  "socketPath": "/tmp/thub-client.sock",
+  "heartbeatIntervalSec": 10,
+  "longPollWaitSec": 30,
+  "artifactory": {
+    "tokenFile": "/etc/thub/artifactory.token",
+    "allowedArtifactPrefixes": ["https://artifactory.example.com/fw-local/"]
+  },
+  "hw": {
+    "stlinkSerial": "066DFF485550755187121234",
+    "uart": { "path": "/dev/thub/dut0-uart", "baudRate": 115200 },
+    "power": { "method": "uhubctl", "hub": "1-1", "port": 2 }
+  },
+  "sw": {
+    "image": "registry.example.com/dut-emulator:2026.08",
+    "cpus": 2,
+    "memory": "2g"
+  }
+}
