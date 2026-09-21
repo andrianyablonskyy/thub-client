@@ -53,6 +53,10 @@ function loadConfig(configPath = process.env.THUB_CLIENT_CONFIG) {
     name: raw.name,
     type: raw.type,
     labels: raw.labels || [],
+    // Which resource group(s) this Client belongs to (README §13.1) — a
+    // job can be constrained with `thub run --group <id>` to only run on
+    // resources in a given group. A resource can be in several at once.
+    groups: raw.groups || [],
     // Shared secret that lets this Client self-register with no admin
     // action on the Coordinator side (see daemon.js _ensureRegistered).
     joinKey: process.env.THUB_CLIENT_JOIN_KEY || raw.joinKey || '',
