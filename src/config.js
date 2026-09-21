@@ -31,6 +31,16 @@ function loadConfig(configPath = process.env.THUB_CLIENT_CONFIG) {
   // still overridable explicitly for non-standard layouts.
   const instance = path.basename(candidate, path.extname(candidate));
 
+  // /var/lib/thub and /run/thub are the systemd-deployment defaults
+  // (§8.5) — both writable there because the unit runs as the `thub`
+  // system user with ReadWritePaths=/var/lib/thub and
+  // RuntimeDirectory=thub. Neither is guaranteed to exist anywhere else
+  // (notably /run doesn't exist at all on macOS), so both roots are
+  // configurable — set `varDir`/`runDir` once instead of overriding every
+  // individual path.
+  const varDir = raw.varDir || '/var/lib/thub';
+  const runDir = raw.runDir || '/run/thub';
+
   const hw = resolveHwConfig(raw.hw || {});
 
   const config = {
@@ -41,10 +51,10 @@ function loadConfig(configPath = process.env.THUB_CLIENT_CONFIG) {
     // Shared secret that lets this Client self-register with no admin
     // action on the Coordinator side (see daemon.js _ensureRegistered).
     joinKey: process.env.THUB_CLIENT_JOIN_KEY || raw.joinKey || '',
-    tokenFile: raw.tokenFile || `/var/lib/thub/${instance}.token`,
-    workDir: raw.workDir || `/var/lib/thub/work/${instance}`,
-    socketPath: raw.socketPath || `/run/thub/${instance}.sock`,
-    pidFile: raw.pidFile || `/run/thub/${instance}.pid`,
+    tokenFile: raw.tokenFile || path.join(varDir, `${instance}.token`),
+    workDir: raw.workDir || path.join(varDir, 'work', instance),
+    socketPath: raw.socketPath || path.join(runDir, `${instance}.sock`),
+    pidFile: raw.pidFile || path.join(runDir, `${instance}.pid`),
     artifactory: resolveArtifactoryConfig(raw.artifactory || {}),
     hw,
     sw: raw.sw || {},
