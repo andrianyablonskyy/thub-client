@@ -59,6 +59,7 @@ class Daemon {
     if (this.config.joinKey) {
       const anon = new ClientApiClient({ baseUrl: this.config.coordinatorUrl, token: this.config.joinKey });
       const { resourceId, resourceToken } = await anon.post('/resources/register', {
+        clientId: this.config.clientId,
         name: this.config.name,
         type: this.config.type,
         labels: this.config.labels,
