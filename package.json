@@ -1,0 +1,19 @@
+{
+  "name": "@thub/client",
+  "version": "1.0.0",
+  "description": "thub-client — runs on lab machines, executes test jobs against a DUT (HW) or emulator (SW)",
+  "main": "src/daemon.js",
+  "bin": {
+    "thub-client": "./src/cli.js"
+  },
+  "scripts": {
+    "start": "node src/daemon.js"
+  },
+  "dependencies": {
+    "@thub/shared": "*",
+    "commander": "^13.1.0",
+    "dockerode": "^4.0.5",
+    "js-yaml": "^4.1.0",
+    "uuid": "^11.1.0"
+  }
+}
