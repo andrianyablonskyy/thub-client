@@ -49,29 +49,34 @@ class Daemon {
     fs.rmSync(this.config.socketPath, { force: true });
   }
 
+  // Re-registers on every start/restart whenever a joinKey is configured
+  // (the default — the bundled config ships one), so the Coordinator picks
+  // up this Client's current name/type/labels/status each time, not just
+  // the first time ever (registry.registerAuto does the actual update).
+  // Falls back to a previously-stored token only when joinKey has been
+  // deliberately stripped out of the config after initial setup.
   async _ensureRegistered() {
-    const creds = readCredentials(this.config.tokenFile);
-    if (creds) {
-      this.resourceId = creds.resourceId;
-      this.client = new ClientApiClient({ baseUrl: this.config.coordinatorUrl, token: creds.resourceToken });
+    if (this.config.joinKey) {
+      const anon = new ClientApiClient({ baseUrl: this.config.coordinatorUrl, token: this.config.joinKey });
+      const { resourceId, resourceToken } = await anon.post('/resources/register', {
+        name: this.config.name,
+        type: this.config.type,
+        labels: this.config.labels,
+        hostInfo: { hostname: require('node:os').hostname(), platform: process.platform },
+      });
+      writeCredentials(this.config.tokenFile, { resourceId, resourceToken });
+      this.resourceId = resourceId;
+      this.client = new ClientApiClient({ baseUrl: this.config.coordinatorUrl, token: resourceToken });
+      console.log(`Registered as resource ${resourceId}`);
       return;
     }
-    if (!this.config.joinKey) {
+
+    const creds = readCredentials(this.config.tokenFile);
+    if (!creds) {
       throw new Error('No resource token on disk and no joinKey in config (or THUB_CLIENT_JOIN_KEY)');
     }
-    // The join key stands in for a bearer token here — it's what proves
-    // this Client is allowed to self-register, not a per-resource secret.
-    const anon = new ClientApiClient({ baseUrl: this.config.coordinatorUrl, token: this.config.joinKey });
-    const { resourceId, resourceToken } = await anon.post('/resources/register', {
-      name: this.config.name,
-      type: this.config.type,
-      labels: this.config.labels,
-      hostInfo: { hostname: require('node:os').hostname(), platform: process.platform },
-    });
-    writeCredentials(this.config.tokenFile, { resourceId, resourceToken });
-    this.resourceId = resourceId;
-    this.client = new ClientApiClient({ baseUrl: this.config.coordinatorUrl, token: resourceToken });
-    console.log(`Registered as resource ${resourceId}`);
+    this.resourceId = creds.resourceId;
+    this.client = new ClientApiClient({ baseUrl: this.config.coordinatorUrl, token: creds.resourceToken });
   }
 
   _startControlSocket() {
