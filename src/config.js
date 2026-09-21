@@ -32,15 +32,19 @@ function loadConfig(configPath = process.env.THUB_CLIENT_CONFIG) {
   // still overridable explicitly for non-standard layouts.
   const instance = path.basename(candidate, path.extname(candidate));
 
-  // /var/lib/thub and /run/thub are the systemd-deployment defaults
-  // (§8.5) — both writable there because the unit runs as the `thub`
-  // system user with ReadWritePaths=/var/lib/thub and
-  // RuntimeDirectory=thub. Neither is guaranteed to exist anywhere else
-  // (notably /run doesn't exist at all on macOS), so both roots are
-  // configurable — set `varDir`/`runDir` once instead of overriding every
-  // individual path.
-  const varDir = raw.varDir || '/var/lib/thub';
-  const runDir = raw.runDir || '/run/thub';
+  // Default to a directory under the current working directory — always
+  // writable, on every platform, with zero setup — rather than an FHS
+  // system path. That used to be the reverse (defaulting to /var/lib/thub
+  // and /run/thub, the systemd-deployment paths, §8.5) and every new
+  // path-based config field added since kept inheriting the same bug: it
+  // worked under systemd (which grants exactly those two directories via
+  // ReadWritePaths=/var/lib/thub and RuntimeDirectory=thub) and failed
+  // everywhere else — worst of all on macOS, where /run doesn't exist at
+  // all. A systemd deployment now sets `varDir`/`runDir` explicitly in its
+  // /etc/thub/dut<N>.yaml (§8.6) to opt *into* the FHS paths, instead of
+  // every other environment needing to opt *out* of them.
+  const varDir = raw.varDir || path.join(process.cwd(), '.data');
+  const runDir = raw.runDir || varDir;
 
   const hw = resolveHwConfig(raw.hw || {});
 
