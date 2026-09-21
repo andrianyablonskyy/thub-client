@@ -63,6 +63,7 @@ class Daemon {
         name: this.config.name,
         type: this.config.type,
         labels: this.config.labels,
+        groups: this.config.groups,
         hostInfo: { hostname: require('node:os').hostname(), platform: process.platform },
       });
       writeCredentials(this.config.tokenFile, { resourceId, resourceToken });

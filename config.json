@@ -3,6 +3,7 @@
   "name": "lab-HIL-01",
   "type": "hw",
   "labels": [],
+  "groups": [],
   "joinKey": "change-me-to-a-long-random-string",
   "heartbeatIntervalSec": 10,
   "longPollWaitSec": 30,
