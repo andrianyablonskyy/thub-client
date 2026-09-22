@@ -1,3 +1,16 @@
+/**
+ * @file        packages/client/src/relay-client.js
+ * @description REST client stub for the networked relay board used for DUT power cycling (README §8.6)
+ *
+ * @author      Andrian Yablonskyy
+ * @copyright   Copyright (c) 2026 Andrian Yablonskyy. All rights reserved.
+ *
+ * This file is part of TestHub and is proprietary and confidential.
+ * Unauthorized copying, modification, distribution, or use of this file,
+ * via any medium, is strictly prohibited without prior written permission
+ * from AdSystem.PRO.
+ */
+
 'use strict';
 
 // STUB — DUT power via a relay board's REST API (README §8.2/§8.6,
