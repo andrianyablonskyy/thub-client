@@ -21,10 +21,14 @@ sudo apt install -y docker.io && sudo usermod -aG docker thub
 
 # npm install doesn't create this — write your own, one per DUT slot,
 # named to match the systemd instance you enable below (dut0 -> dut0.json).
+# %h in the unit resolves to thub's home (/var/lib/thub, set via
+# useradd --home above), so the file lives under its .config, same as
+# every other package's ~/.config/thub/<name>.json default (§13).
 # See "Configuration reference" below for every field and full SW/HW
 # examples.
-sudo mkdir -p /etc/thub
-sudo tee /etc/thub/dut0.json > /dev/null <<'EOF'
+sudo mkdir -p /var/lib/thub/.config/thub
+sudo chown thub:thub /var/lib/thub/.config /var/lib/thub/.config/thub
+sudo tee /var/lib/thub/.config/thub/dut0.json > /dev/null <<'EOF'
 {
   "coordinatorUrl": "https://thub.example.com",
   "name": "lab-hw-01",
@@ -36,7 +40,7 @@ EOF
 sudo systemctl enable --now thub-client@dut0
 ```
 
-The systemd unit uses `Restart=always`, `NoNewPrivileges=yes`, `ProtectSystem=strict` and `ReadWritePaths=/var/lib/thub`; the template name (`@dut0`) selects `/etc/thub/dut0.json` so one machine can host multiple DUT slots. Its `ExecStart` is rewritten at install time to this exact install's real `node`/`daemon.js` paths — not just the checked-in file's hardcoded `/usr/lib/node_modules/...` guess — so it works whether Node came from `apt`, `nvm`, or anywhere else.
+The systemd unit uses `Restart=always`, `NoNewPrivileges=yes`, `ProtectSystem=strict` and `ReadWritePaths=/var/lib/thub`; the template name (`@dut0`) selects `~/.config/thub/dut0.json` for the `thub` user (`%h/.config/thub/%i.json` in the unit, i.e. `/var/lib/thub/.config/thub/dut0.json`) so one machine can host multiple DUT slots. Its `ExecStart` is rewritten at install time to this exact install's real `node`/`daemon.js` paths — not just the checked-in file's hardcoded `/usr/lib/node_modules/...` guess — so it works whether Node came from `apt`, `nvm`, or anywhere else.
 
 The udev rule, systemd unit and `~/.config/thub/client.json` install are all best-effort and never fail the `npm install` itself, and only ever run for an actual global install (`npm install -g`) — a plain local `npm install` (e.g. in a dev checkout, or as root inside a CI/Docker image, which is common) never touches `/etc/udev`, `/etc/systemd`, or `~/.config/thub` at all. On a non-Linux machine, or a global install without root, the udev/systemd steps just print their own manual fallback command instead of running it.
 

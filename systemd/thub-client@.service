@@ -7,7 +7,7 @@ Wants=network-online.target
 Type=simple
 User=thub
 Group=thub
-Environment=THUB_CLIENT_CONFIG=/etc/thub/%i.json
+Environment=THUB_CLIENT_CONFIG=%h/.config/thub/%i.json
 ExecStart=/usr/bin/node /usr/lib/node_modules/@andrian.yablonskyy/thub-client/src/daemon.js
 Restart=always
 RestartSec=2
