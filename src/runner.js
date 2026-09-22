@@ -31,6 +31,7 @@ class JobRunner{
     this.config = config;
     this.canceled = false;
     this.child = null;
+    this.jobUser = null;
   }
 
   // `reportResult`: true when this is an operator-initiated stop
@@ -55,9 +56,13 @@ class JobRunner{
   // Mirrors what someone following the job through the Agent CLI or
   // dashboard would see (§7.1) — state transitions and the final verdict —
   // printed locally too, so the terminal running the daemon itself shows
-  // what it's doing instead of going silent for the whole job.
+  // what it's doing instead of going silent for the whole job. Includes
+  // `spec.user` (`thub run --user`, §7.1) when set — purely a label so
+  // whoever's at the bench can tell whose job is running, no different
+  // from `busySource`/`busyReason` for a manual lock.
   _announce(state){
-    console.log(`-- ${state} on ${this.config.name} --`);
+    const owner = this.jobUser ? ` (user: ${this.jobUser})` : '';
+    console.log(`-- ${state} on ${this.config.name}${owner} --`);
   }
 
   _announceFinished(state){
@@ -65,6 +70,7 @@ class JobRunner{
   }
 
   async run(job){
+    this.jobUser = job.spec.user;
     const jobDir = path.join(this.config.workDir, job.id);
     fs.mkdirSync(jobDir, { recursive: true });
     const logShipper = new LogShipper(this.client, job.id, this.config);
@@ -305,6 +311,7 @@ function dryRunReport(job){
   return (
     'TestHub dry run — no commands were executed on this Client.\n\n' +
     `job:      ${job.id}\n` +
+    (job.spec.user ? `user:     ${job.spec.user}\n` : '') +
     `target:   ${job.spec.target.type} labels=${(job.spec.target.labels || []).join(',') || '(none)'}\n` +
     `firmware: ${job.spec.firmware.url}\n` +
     `tests:    ${job.spec.tests.url} (suite=${job.spec.tests.suite || 'default'})\n` +
