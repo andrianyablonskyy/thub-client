@@ -16,7 +16,6 @@
     "@andrian.yablonskyy/thub-common": "*",
     "commander": "^13.1.0",
     "dockerode": "^4.0.5",
-    "js-yaml": "^4.1.0",
     "uuid": "^11.1.0"
   },
   "devDependencies": {

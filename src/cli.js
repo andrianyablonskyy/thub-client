@@ -36,12 +36,12 @@ program
     '-c, --config <path>',
     'Path to this Client\'s config file (overrides THUB_CLIENT_CONFIG). Required to target a ' +
       'specific instance when running several Clients on one host (§8.6) — must come before the ' +
-      'subcommand, e.g. `thub-client --config /etc/thub/dut1.yaml stop`.'
+      'subcommand, e.g. `thub-client --config /etc/thub/dut1.json stop`.'
   );
 
 // Every subcommand loads its own config fresh (rather than once at startup)
 // so `--config`/THUB_CLIENT_CONFIG is re-read per invocation — the same
-// instance a `thub-client --config dut1.yaml stop` targets is the one whose
+// instance a `thub-client --config dut1.json stop` targets is the one whose
 // pidFile/socketPath get used, never a stale default from process start.
 function config(){
   return loadConfig(program.opts().config);

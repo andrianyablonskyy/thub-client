@@ -22,24 +22,24 @@ sudo apt install -y docker.io && sudo usermod -aG docker thub
 sudo systemctl enable --now thub-client@dut0
 ```
 
-The systemd unit uses `Restart=always`, `NoNewPrivileges=yes`, `ProtectSystem=strict` and `ReadWritePaths=/var/lib/thub`; the template name (`@dut0`) selects `/etc/thub/dut0.yaml` so one machine can host multiple DUT slots. Its `ExecStart` is rewritten at install time to this exact install's real `node`/`daemon.js` paths — not just the checked-in file's hardcoded `/usr/lib/node_modules/...` guess — so it works whether Node came from `apt`, `nvm`, or anywhere else.
+The systemd unit uses `Restart=always`, `NoNewPrivileges=yes`, `ProtectSystem=strict` and `ReadWritePaths=/var/lib/thub`; the template name (`@dut0`) selects `/etc/thub/dut0.json` so one machine can host multiple DUT slots. Its `ExecStart` is rewritten at install time to this exact install's real `node`/`daemon.js` paths — not just the checked-in file's hardcoded `/usr/lib/node_modules/...` guess — so it works whether Node came from `apt`, `nvm`, or anywhere else.
 
 Both the udev rule and the systemd unit install are best-effort and never fail the `npm install` itself: on a non-Linux machine they're skipped silently (nothing to do), and on Linux without root each just prints its own manual fallback command instead of running it.
 
 ## Running it directly (development, or a one-off manual run)
 
 ```bash
-THUB_CLIENT_CONFIG=/etc/thub/dut0.yaml node src/daemon.js
-node src/daemon.js --config /etc/thub/dut0.yaml   # equivalent
+THUB_CLIENT_CONFIG=/etc/thub/dut0.json node src/daemon.js
+node src/daemon.js --config /etc/thub/dut0.json   # equivalent
 ```
 
-Config resolution: `--config`/`-c` flag, or `THUB_CLIENT_CONFIG` env var, → `/etc/thub/dut0.yaml` → the bundled `config.json` default. The loader accepts YAML (JSON is a valid subset).
+Config resolution: `--config`/`-c` flag, or `THUB_CLIENT_CONFIG` env var, → `/etc/thub/dut0.json` → the bundled `config.json` default. Plain JSON only.
 
-**Running several Clients on one host** — start one daemon process per config file, each pointed at its own `dutN.yaml`; every default path (`tokenFile`, `workDir`, `socketPath`, `pidFile`, `clientIdFile`) is already namespaced by the config file's own basename, so up to 8 instances (`dut0`..`dut7`, one per UART/ST-Link/relay channel) coexist with zero extra setup:
+**Running several Clients on one host** — start one daemon process per config file, each pointed at its own `dutN.json`; every default path (`tokenFile`, `workDir`, `socketPath`, `pidFile`, `clientIdFile`) is already namespaced by the config file's own basename, so up to 8 instances (`dut0`..`dut7`, one per UART/ST-Link/relay channel) coexist with zero extra setup:
 
 ```bash
-THUB_CLIENT_CONFIG=/etc/thub/dut0.yaml node src/daemon.js &
-THUB_CLIENT_CONFIG=/etc/thub/dut1.yaml node src/daemon.js &
+THUB_CLIENT_CONFIG=/etc/thub/dut0.json node src/daemon.js &
+THUB_CLIENT_CONFIG=/etc/thub/dut1.json node src/daemon.js &
 ```
 
 If two instances instead share the exact same config file (told apart only by editing `name` between runs), that namespacing collapses and both register as the *same* resource. Set `clientId` (or `THUB_CLIENT_ID`) and distinct `socketPath`/`pidFile` explicitly in that case.
@@ -99,8 +99,8 @@ thub-client restart   # stop, then start a new daemon with the same config
 With several instances on one host, target the right one with `--config` before the subcommand:
 
 ```bash
-thub-client --config /etc/thub/dut1.yaml status
-sudo thub-client --config /etc/thub/dut1.yaml lock --reason "debugging I2C"
+thub-client --config /etc/thub/dut1.json status
+sudo thub-client --config /etc/thub/dut1.json lock --reason "debugging I2C"
 ```
 
 ## Job execution lifecycle
