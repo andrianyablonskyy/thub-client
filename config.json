@@ -1,9 +1,9 @@
 {
   "coordinatorUrl": "http://localhost:8000",
-  "name": "lab-HIL-02",
+  "name": "lab-hw-01",
   "type": "hw",
   "labels": [],
-  "groups": ["6fb5c7f5-e3df-451c-9406-5bdc6e0e15b4"],
+  "groups": [],
   "joinKey": "change-me-to-a-long-random-string",
   "heartbeatIntervalSec": 10,
   "longPollWaitSec": 30,

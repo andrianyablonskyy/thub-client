@@ -38,7 +38,7 @@ sudo systemctl enable --now thub-client@dut0
 
 The systemd unit uses `Restart=always`, `NoNewPrivileges=yes`, `ProtectSystem=strict` and `ReadWritePaths=/var/lib/thub`; the template name (`@dut0`) selects `/etc/thub/dut0.json` so one machine can host multiple DUT slots. Its `ExecStart` is rewritten at install time to this exact install's real `node`/`daemon.js` paths — not just the checked-in file's hardcoded `/usr/lib/node_modules/...` guess — so it works whether Node came from `apt`, `nvm`, or anywhere else.
 
-Both the udev rule and the systemd unit install are best-effort and never fail the `npm install` itself, and only ever run for an actual global install (`npm install -g`) — a plain local `npm install` (e.g. in a dev checkout, or as root inside a CI/Docker image, which is common) never touches `/etc/udev` or `/etc/systemd` at all. On a non-Linux machine, or a global install without root, each just prints its own manual fallback command instead of running it.
+The udev rule, systemd unit and `~/.config/thub/client.json` install are all best-effort and never fail the `npm install` itself, and only ever run for an actual global install (`npm install -g`) — a plain local `npm install` (e.g. in a dev checkout, or as root inside a CI/Docker image, which is common) never touches `/etc/udev`, `/etc/systemd`, or `~/.config/thub` at all. On a non-Linux machine, or a global install without root, the udev/systemd steps just print their own manual fallback command instead of running it.
 
 ## Running it directly (no systemd — after a global install, development, or a one-off manual run)
 
@@ -52,6 +52,8 @@ thub-client-daemon --config /etc/thub/dut0.json   # equivalent
 From a local checkout of this repo (not a global install), the same thing is `node src/daemon.js` in place of `thub-client-daemon`.
 
 Config resolution: `--config`/`-c` flag, or `THUB_CLIENT_CONFIG` env var, → `~/.config/thub/client.json` → the bundled `config.json` default. Plain JSON only. A specific instance still always needs its own explicit `--config`/`THUB_CLIENT_CONFIG` — the `~/.config/thub/client.json` fallback only covers the single default/no-flag case.
+
+`npm install -g` creates `~/.config/thub/client.json` for you if it doesn't already exist, with blank `coordinatorUrl`/`name`/`joinKey` (so nothing registers until you set them) — a re-install never overwrites it. For a multi-instance setup (`dutN.json` files, above) it's just a starting point for your first/default instance.
 
 **Running several Clients on one host** — start one daemon process per config file, each pointed at its own `dutN.json`; every default path (`tokenFile`, `workDir`, `socketPath`, `pidFile`, `clientIdFile`) is already namespaced by the config file's own basename, so up to 8 instances (`dut0`..`dut7`, one per UART/ST-Link/relay channel) coexist with zero extra setup:
 
