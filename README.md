@@ -4,17 +4,21 @@ The Client (`thub-client`) component of [TestHub](https://github.com/andrianyabl
 
 Clients only make **outbound** connections to the [Coordinator](https://github.com/andrianyablonskyy/thub-coordinator) — nothing in the lab needs to be exposed. See the [main TestHub repo](https://github.com/andrianyablonskyy/thub) for the full system architecture.
 
-## Install (Ubuntu 26.04)
+## Install
+
+```bash
+sudo npm i -g @andrian.yablonskyy/thub-client
+```
+
+Run as root on Linux, this also installs `udev/99-thub.rules` (HW only) and `systemd/thub-client@.service` via the package's postinstall script — no separate manual `cp` step for either. See "Ubuntu 26.04 host setup" below for the full setup (service user, Docker for SW, per-DUT config, enabling the systemd instance).
+
+## Ubuntu 26.04 host setup
 
 ```bash
 sudo apt install -y nodejs npm stlink-tools openocd uhubctl
 sudo useradd --system --home /var/lib/thub --groups dialout,plugdev thub
 
-# This also installs udev/99-thub.rules to /etc/udev/rules.d (HW only)
-# and systemd/thub-client@.service to /etc/systemd/system, via the
-# package's postinstall script — since npm runs it as root here, no
-# separate manual `cp` step is needed for either.
-sudo npm install -g @andrian.yablonskyy/thub-client
+sudo npm i -g @andrian.yablonskyy/thub-client
 
 # SW only: Docker
 sudo apt install -y docker.io && sudo usermod -aG docker thub
