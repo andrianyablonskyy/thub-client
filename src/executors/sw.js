@@ -1,3 +1,16 @@
+/**
+ * @file        packages/client/src/executors/sw.js
+ * @description SW executor: runs a job's DUT emulator in a per-job Docker container (README §8.3)
+ *
+ * @author      Andrian Yablonskyy
+ * @copyright   Copyright (c) 2026 Andrian Yablonskyy. All rights reserved.
+ *
+ * This file is part of TestHub and is proprietary and confidential.
+ * Unauthorized copying, modification, distribution, or use of this file,
+ * via any medium, is strictly prohibited without prior written permission
+ * from AdSystem.PRO.
+ */
+
 'use strict';
 
 const net = require('node:net');

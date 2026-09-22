@@ -1,9 +1,22 @@
+/**
+ * @file        packages/client/src/runner.js
+ * @description Executes a single job end-to-end on the Client: download, run, report, cleanup (README §8.1)
+ *
+ * @author      Andrian Yablonskyy
+ * @copyright   Copyright (c) 2026 Andrian Yablonskyy. All rights reserved.
+ *
+ * This file is part of TestHub and is proprietary and confidential.
+ * Unauthorized copying, modification, distribution, or use of this file,
+ * via any medium, is strictly prohibited without prior written permission
+ * from AdSystem.PRO.
+ */
+
 'use strict';
 
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
-const { JOB_STATES } = require('@thub/shared');
+const { JOB_STATES } = require('@andrian.yablonskyy/test-hub');
 const { downloadFirmware, downloadAndExtractTests } = require('./downloader');
 const { LogShipper } = require('./log-shipper');
 const { HwExecutor } = require('./executors/hw');
