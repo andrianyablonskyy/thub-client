@@ -15,7 +15,7 @@
 
 const fs = require('node:fs'),
   path = require('node:path'),
-  { ApiClient } = require('@andrian.yablonskyy/test-hub');
+  { ApiClient } = require('@andrian.yablonskyy/thub-common');
 
 // Adds multipart artifact upload (§6.2 POST /jobs/:id/artifacts) on top of
 // the shared JSON API client.

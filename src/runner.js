@@ -16,7 +16,7 @@
 const fs = require('node:fs'),
   path = require('node:path'),
   { spawn } = require('node:child_process'),
-  { JOB_STATES } = require('@andrian.yablonskyy/test-hub'),
+  { JOB_STATES } = require('@andrian.yablonskyy/thub-common'),
   { downloadFirmware, downloadAndExtractTests } = require('./downloader'),
   { LogShipper } = require('./log-shipper'),
   { HwExecutor } = require('./executors/hw'),

@@ -1,4 +1,4 @@
-# @thub/client
+# @andrian.yablonskyy/thub-client
 
 The Client (`thub-client`) component of [TestHub](https://github.com/andrianyablonskyy/thub) — a self-hosted job network that lets CI/CD pipelines and individual developers run firmware tests on real hardware or emulators in a private lab. This is the daemon that runs on lab machines, executes test jobs against a DUT, streams logs back, and uploads results. It owns exactly one DUT slot per process — a machine with two boards runs two instances with different configs.
 
@@ -9,7 +9,7 @@ Clients only make **outbound** connections to the [Coordinator](https://github.c
 ```bash
 sudo apt install -y nodejs npm stlink-tools openocd uhubctl
 sudo useradd --system --home /var/lib/thub --groups dialout,plugdev thub
-sudo npm install -g @thub/client
+sudo npm install -g @andrian.yablonskyy/thub-client
 
 # HW only: stable device names
 sudo cp udev/99-thub.rules /etc/udev/rules.d/ && sudo udevadm control --reload
