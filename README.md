@@ -51,7 +51,7 @@ thub-client-daemon --config /etc/thub/dut0.json   # equivalent
 
 From a local checkout of this repo (not a global install), the same thing is `node src/daemon.js` in place of `thub-client-daemon`.
 
-Config resolution: `--config`/`-c` flag, or `THUB_CLIENT_CONFIG` env var, → `/etc/thub/dut0.json` → the bundled `config.json` default. Plain JSON only.
+Config resolution: `--config`/`-c` flag, or `THUB_CLIENT_CONFIG` env var, → `~/.config/thub/client.json` → the bundled `config.json` default. Plain JSON only. A specific instance still always needs its own explicit `--config`/`THUB_CLIENT_CONFIG` — the `~/.config/thub/client.json` fallback only covers the single default/no-flag case.
 
 **Running several Clients on one host** — start one daemon process per config file, each pointed at its own `dutN.json`; every default path (`tokenFile`, `workDir`, `socketPath`, `pidFile`, `clientIdFile`) is already namespaced by the config file's own basename, so up to 8 instances (`dut0`..`dut7`, one per UART/ST-Link/relay channel) coexist with zero extra setup:
 
