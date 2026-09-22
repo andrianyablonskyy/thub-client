@@ -83,7 +83,18 @@ function loadConfig(configPath = process.env.THUB_CLIENT_CONFIG) {
   // §5.1), not by `name` — so `name`/`type`/`labels` can all be freely
   // changed in this config and the Coordinator updates the same resource
   // in place on the next restart, instead of registering a new one.
-  config.clientId = readOrCreateClientId(config.clientIdFile);
+  //
+  // An explicit `clientId` (config field, or THUB_CLIENT_ID which wins over
+  // it) skips the clientIdFile read-or-create entirely. This is the escape
+  // hatch for running several instances that all resolve to the *same*
+  // config file and thus the same `instance`/`clientIdFile` default (e.g.
+  // both launched from the same cwd against the bundled config.json without
+  // --config) — without it they'd read/write the identical .client-id file
+  // and collide on one shared identity. `--config`/dutN.yaml naming already
+  // avoids this for the normal one-file-per-instance layout (§8.6); this is
+  // for when that's not how the instances are told apart.
+  const explicitClientId = (process.env.THUB_CLIENT_ID || raw.clientId || '').trim();
+  config.clientId = explicitClientId || readOrCreateClientId(config.clientIdFile);
 
   return config;
 }
