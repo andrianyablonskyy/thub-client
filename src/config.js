@@ -14,26 +14,35 @@
 'use strict';
 
 const fs = require('node:fs'),
+  os = require('node:os'),
   path = require('node:path'),
   crypto = require('node:crypto');
 
-// Bundled with the package as a working example; a real Client overrides
-// it with THUB_CLIENT_CONFIG or /etc/thub/dut0.json (§13).
-const PACKAGE_DEFAULT_CONFIG_PATH = path.join(__dirname, '..', 'config.json'),
+// User-level default (§13) — consulted when neither --config nor
+// THUB_CLIENT_CONFIG is set, before falling back to the bundled default
+// below. A specific instance (dut0, dut1, ...) still always needs an
+// explicit --config/THUB_CLIENT_CONFIG pointing at its own file — this is
+// only ever the fallback for the single default/no-flag case, same as it
+// was when that fallback was the fixed path /etc/thub/dut0.json.
+const USER_CONFIG_PATH = path.join(os.homedir(), '.config', 'thub', 'client.json'),
+
+  // Bundled with the package as a working example; a real Client overrides
+  // it with THUB_CLIENT_CONFIG or ~/.config/thub/client.json (§13).
+  PACKAGE_DEFAULT_CONFIG_PATH = path.join(__dirname, '..', 'config.json'),
 
   // A host runs one Client process per DUT slot (§3.3), up to MAX_SLOTS of
   // them (dut0..dut7) — matching up to 8 UART adapters, 8 ST-Link probes, 8
   // USB-controlled DUTs and 8 relay channels on one bench (§8.2, §8.6).
   MAX_SLOTS = 8;
 
-// Matches README.md §13 (/etc/thub/dut0.json).
+// Matches README.md §13 (~/.config/thub/client.json).
 function loadConfig(configPath = process.env.THUB_CLIENT_CONFIG){
-  const candidate = [configPath, '/etc/thub/dut0.json', PACKAGE_DEFAULT_CONFIG_PATH].find(
+  const candidate = [configPath, USER_CONFIG_PATH, PACKAGE_DEFAULT_CONFIG_PATH].find(
     (p) => p && fs.existsSync(p)
   );
   if (!candidate){
     throw new Error(
-      'Client config not found (set THUB_CLIENT_CONFIG, or create /etc/thub/dut0.json)'
+      'Client config not found (set THUB_CLIENT_CONFIG, or create ~/.config/thub/client.json)'
     );
   }
   const raw = JSON.parse(fs.readFileSync(candidate, 'utf8')) || {},
