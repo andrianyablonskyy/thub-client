@@ -8,7 +8,7 @@
   },
   "scripts": {
     "start": "node src/daemon.js",
-    "postinstall": "node scripts/install-udev-rules.js",
+    "postinstall": "node scripts/install-udev-rules.js && node scripts/install-systemd-unit.js",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix"
   },

@@ -8,7 +8,7 @@ Type=simple
 User=thub
 Group=thub
 Environment=THUB_CLIENT_CONFIG=/etc/thub/%i.yaml
-ExecStart=/usr/bin/node /usr/lib/node_modules/@thub/client/src/daemon.js
+ExecStart=/usr/bin/node /usr/lib/node_modules/@andrian.yablonskyy/thub-client/src/daemon.js
 Restart=always
 RestartSec=2
 NoNewPrivileges=yes
