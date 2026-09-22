@@ -31,7 +31,7 @@ function isRoot(){
 
 // Same philosophy as install-udev-rules.js: best-effort, never fails the
 // `npm install` itself. Doesn't enable/start anything — that needs a real
-// /etc/thub/<instance>.yaml in place first (§8.6), which this can't know
+// /etc/thub/<instance>.json in place first (§8.6), which this can't know
 // exists yet, so `sudo systemctl enable --now thub-client@dut0` stays a
 // deliberate, separate manual step (§8.5).
 function main(){

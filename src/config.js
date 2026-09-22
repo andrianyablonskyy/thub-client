@@ -1,6 +1,6 @@
 /**
  * @file        packages/client/src/config.js
- * @description Client config resolution: YAML config loading, per-instance path defaults, clientId (README §8.6)
+ * @description Client config resolution: JSON config loading, per-instance path defaults, clientId (README §8.6)
  *
  * @author      Andrian Yablonskyy
  * @copyright   Copyright (c) 2026 Andrian Yablonskyy. All rights reserved.
@@ -15,11 +15,10 @@
 
 const fs = require('node:fs'),
   path = require('node:path'),
-  crypto = require('node:crypto'),
-  yaml = require('js-yaml');
+  crypto = require('node:crypto');
 
 // Bundled with the package as a working example; a real Client overrides
-// it with THUB_CLIENT_CONFIG or /etc/thub/dut0.yaml (§13).
+// it with THUB_CLIENT_CONFIG or /etc/thub/dut0.json (§13).
 const PACKAGE_DEFAULT_CONFIG_PATH = path.join(__dirname, '..', 'config.json'),
 
   // A host runs one Client process per DUT slot (§3.3), up to MAX_SLOTS of
@@ -27,20 +26,20 @@ const PACKAGE_DEFAULT_CONFIG_PATH = path.join(__dirname, '..', 'config.json'),
   // USB-controlled DUTs and 8 relay channels on one bench (§8.2, §8.6).
   MAX_SLOTS = 8;
 
-// Matches README.md §13 (/etc/thub/dut0.yaml).
+// Matches README.md §13 (/etc/thub/dut0.json).
 function loadConfig(configPath = process.env.THUB_CLIENT_CONFIG){
-  const candidate = [configPath, '/etc/thub/dut0.yaml', PACKAGE_DEFAULT_CONFIG_PATH].find(
+  const candidate = [configPath, '/etc/thub/dut0.json', PACKAGE_DEFAULT_CONFIG_PATH].find(
     (p) => p && fs.existsSync(p)
   );
   if (!candidate){
     throw new Error(
-      'Client config not found (set THUB_CLIENT_CONFIG, or create /etc/thub/dut0.yaml)'
+      'Client config not found (set THUB_CLIENT_CONFIG, or create /etc/thub/dut0.json)'
     );
   }
-  const raw = yaml.load(fs.readFileSync(candidate, 'utf8')) || {},
+  const raw = JSON.parse(fs.readFileSync(candidate, 'utf8')) || {},
 
     // Per-instance defaults derived from the config file's own name (e.g.
-    // dut3.yaml -> dut3.token / dut3.sock / dut3.pid), so several Client
+    // dut3.json -> dut3.token / dut3.sock / dut3.pid), so several Client
     // instances on one host don't collide on a shared default path — each
     // still overridable explicitly for non-standard layouts.
     instance = path.basename(candidate, path.extname(candidate)),
@@ -54,7 +53,7 @@ function loadConfig(configPath = process.env.THUB_CLIENT_CONFIG){
     // ReadWritePaths=/var/lib/thub and RuntimeDirectory=thub) and failed
     // everywhere else — worst of all on macOS, where /run doesn't exist at
     // all. A systemd deployment now sets `varDir`/`runDir` explicitly in its
-    // /etc/thub/dut<N>.yaml (§8.6) to opt *into* the FHS paths, instead of
+    // /etc/thub/dut<N>.json (§8.6) to opt *into* the FHS paths, instead of
     // every other environment needing to opt *out* of them.
     varDir = raw.varDir || path.join(process.cwd(), '.data'),
     runDir = raw.runDir || varDir,
@@ -103,7 +102,7 @@ function loadConfig(configPath = process.env.THUB_CLIENT_CONFIG){
   // config file and thus the same `instance`/`clientIdFile` default (e.g.
   // both launched from the same cwd against the bundled config.json without
   // --config) — without it they'd read/write the identical .client-id file
-  // and collide on one shared identity. `--config`/dutN.yaml naming already
+  // and collide on one shared identity. `--config`/dutN.json naming already
   // avoids this for the normal one-file-per-instance layout (§8.6); this is
   // for when that's not how the instances are told apart.
   const explicitClientId = (process.env.THUB_CLIENT_ID || raw.clientId || '').trim();
@@ -161,9 +160,9 @@ function resolveArtifactoryConfig(artifactory){
 }
 
 function saveConfigField(configPath, key, value){
-  const raw = yaml.load(fs.readFileSync(configPath, 'utf8')) || {};
+  const raw = JSON.parse(fs.readFileSync(configPath, 'utf8')) || {};
   raw[key] = value;
-  fs.writeFileSync(configPath, yaml.dump(raw));
+  fs.writeFileSync(configPath, JSON.stringify(raw, null, 2) + '\n');
 }
 
 // Stored as JSON so a restarted daemon knows its resourceId without
