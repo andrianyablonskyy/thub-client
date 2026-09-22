@@ -10,21 +10,21 @@ Clients only make **outbound** connections to the [Coordinator](https://github.c
 sudo apt install -y nodejs npm stlink-tools openocd uhubctl
 sudo useradd --system --home /var/lib/thub --groups dialout,plugdev thub
 
-# HW only: this also installs udev/99-thub.rules to /etc/udev/rules.d
-# and reloads udev, via the package's postinstall script — since npm
-# runs it as root here, no separate manual step is needed.
+# This also installs udev/99-thub.rules to /etc/udev/rules.d (HW only)
+# and systemd/thub-client@.service to /etc/systemd/system, via the
+# package's postinstall script — since npm runs it as root here, no
+# separate manual `cp` step is needed for either.
 sudo npm install -g @andrian.yablonskyy/thub-client
 
 # SW only: Docker
 sudo apt install -y docker.io && sudo usermod -aG docker thub
 
-sudo cp systemd/thub-client@.service /etc/systemd/system/
 sudo systemctl enable --now thub-client@dut0
 ```
 
-The systemd unit uses `Restart=always`, `NoNewPrivileges=yes`, `ProtectSystem=strict` and `ReadWritePaths=/var/lib/thub`; the template name (`@dut0`) selects `/etc/thub/dut0.yaml` so one machine can host multiple DUT slots.
+The systemd unit uses `Restart=always`, `NoNewPrivileges=yes`, `ProtectSystem=strict` and `ReadWritePaths=/var/lib/thub`; the template name (`@dut0`) selects `/etc/thub/dut0.yaml` so one machine can host multiple DUT slots. Its `ExecStart` is rewritten at install time to this exact install's real `node`/`daemon.js` paths — not just the checked-in file's hardcoded `/usr/lib/node_modules/...` guess — so it works whether Node came from `apt`, `nvm`, or anywhere else.
 
-The udev rule install is best-effort and never fails the `npm install` itself: on a non-Linux machine it's skipped silently (nothing to do), and on Linux without root it just prints the manual command (`sudo cp .../udev/99-thub.rules /etc/udev/rules.d/ && sudo udevadm control --reload`) instead of doing it — the same command this used to require every time.
+Both the udev rule and the systemd unit install are best-effort and never fail the `npm install` itself: on a non-Linux machine they're skipped silently (nothing to do), and on Linux without root each just prints its own manual fallback command instead of running it.
 
 ## Running it directly (development, or a one-off manual run)
 
