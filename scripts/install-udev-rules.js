@@ -26,12 +26,22 @@ function isRoot(){
   return typeof process.getuid === 'function' && process.getuid() === 0;
 }
 
+// npm only sets this for an actual `npm install -g` — absent for a plain
+// local/workspace install. Without this check, a *local* `npm install`
+// run as root (the norm inside most Linux Docker images and CI runners)
+// would still be root+Linux and would otherwise trip the isRoot() branch
+// below, silently writing into /etc/udev/rules.d on a dev/CI box that
+// was never meant to run as a real Client at all.
+function isGlobalInstall(){
+  return process.env.npm_config_global === 'true';
+}
+
 // A postinstall step is a convenience, not a requirement — this must never
 // fail (or exit non-zero and) take the whole `npm install` down with it.
 // SW-only Clients, non-root local installs, and every non-Linux dev
 // machine all just fall back to the manual command README §8.5 documents.
 function main(){
-  if (process.platform !== 'linux'){
+  if (process.platform !== 'linux' || !isGlobalInstall()){
     return;
   }
 

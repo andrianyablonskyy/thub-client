@@ -29,13 +29,22 @@ function isRoot(){
   return typeof process.getuid === 'function' && process.getuid() === 0;
 }
 
+// npm only sets this for an actual `npm install -g` — see the matching
+// check in install-udev-rules.js for why this matters: without it, a
+// *local* `npm install` run as root (the norm in most Linux Docker images
+// and CI runners) would still install a real unit into /etc/systemd/system
+// on a box that was never meant to run as a Client at all.
+function isGlobalInstall(){
+  return process.env.npm_config_global === 'true';
+}
+
 // Same philosophy as install-udev-rules.js: best-effort, never fails the
 // `npm install` itself. Doesn't enable/start anything — that needs a real
 // /etc/thub/<instance>.json in place first (§8.6), which this can't know
 // exists yet, so `sudo systemctl enable --now thub-client@dut0` stays a
 // deliberate, separate manual step (§8.5).
 function main(){
-  if (process.platform !== 'linux'){
+  if (process.platform !== 'linux' || !isGlobalInstall()){
     return;
   }
 
