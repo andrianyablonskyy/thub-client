@@ -15,10 +15,26 @@ const STOP_TIMEOUT_MS = 20_000;
 
 // §8.4: "sudo thub-client lock --reason ... / sudo thub-client unlock"
 const program = new Command();
-program.name('thub-client').description('Control the local thub-client daemon');
+program
+  .name('thub-client')
+  .description('Control the local thub-client daemon')
+  .option(
+    '-c, --config <path>',
+    'Path to this Client\'s config file (overrides THUB_CLIENT_CONFIG). Required to target a ' +
+      'specific instance when running several Clients on one host (§8.6) — must come before the ' +
+      'subcommand, e.g. `thub-client --config /etc/thub/dut1.yaml stop`.'
+  );
+
+// Every subcommand loads its own config fresh (rather than once at startup)
+// so `--config`/THUB_CLIENT_CONFIG is re-read per invocation — the same
+// instance a `thub-client --config dut1.yaml stop` targets is the one whose
+// pidFile/socketPath get used, never a stale default from process start.
+function config() {
+  return loadConfig(program.opts().config);
+}
 
 function socketPath() {
-  return loadConfig().socketPath;
+  return config().socketPath;
 }
 
 function readPid(pidFile) {
@@ -110,7 +126,7 @@ program
   .command('stop')
   .description('Gracefully stop the daemon (finishes an active job first, then exits)')
   .action(async () => {
-    const ok = await stopDaemon(loadConfig());
+    const ok = await stopDaemon(config());
     process.exit(ok ? 0 : 1);
   });
 
@@ -118,11 +134,11 @@ program
   .command('restart')
   .description('Stop the daemon (if running) and start a new one with the same config')
   .action(async () => {
-    const config = loadConfig();
-    const stopped = await stopDaemon(config);
+    const cfg = config();
+    const stopped = await stopDaemon(cfg);
     if (!stopped) process.exit(1);
 
-    const pid = startDaemon(config);
+    const pid = startDaemon(cfg);
     // Give it a moment to crash on a startup error (bad config, port in
     // use, etc.) before declaring victory — spawn() returning doesn't mean
     // the new process is actually going to stay up.

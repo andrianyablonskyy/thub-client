@@ -214,8 +214,22 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// Accepts --config/-c <path> (or --config=<path>) so a specific instance can
+// be started without exporting THUB_CLIENT_CONFIG first — the same escape
+// hatch `thub-client --config <path> ...` has, for running several Client
+// instances on one host (§8.6). No commander dependency here since this is
+// the only flag the daemon entry point takes.
+function configPathFromArgv(argv) {
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === '--config' || arg === '-c') return argv[i + 1];
+    if (arg.startsWith('--config=')) return arg.slice('--config='.length);
+  }
+  return undefined;
+}
+
 if (require.main === module) {
-  const config = loadConfig();
+  const config = loadConfig(configPathFromArgv(process.argv.slice(2)));
   const daemon = new Daemon(config);
   daemon
     .start()
