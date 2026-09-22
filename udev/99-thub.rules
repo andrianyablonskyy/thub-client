@@ -1,5 +1,5 @@
 # Stable device paths for TestHub HW Clients (README.md §8.2/§8.6).
-# One Client instance handles one DUT slot, up to 8 per host (dut0..dut7) —
+# One Client instance handles one DUT slot, up to 8 per host (dut1..dut8) —
 # replace each <SERIAL_...> placeholder with that slot's actual UART
 # adapter / ST-Link probe serial number (`udevadm info -a` on the device).
 #
@@ -8,42 +8,23 @@
 # index shortcut exists for it — st-flash selects probes by serial, not
 # by udev path).
 
-SUBSYSTEM=="tty", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="374b", \
-  ATTRS{serial}=="<SERIAL_uart_0>", SYMLINK+="thub/dut0-uart"
-SUBSYSTEM=="usb", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="374b", \
-  ATTRS{serial}=="<SERIAL_stlink_0>", SYMLINK+="thub/dut0-stlink"
+# ST Links maps
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="3748", ATTR{devpath}=="3.3.4.3.1", SYMLINK+="dut1-stlink"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="3748", ATTR{devpath}=="3.3.4.2",   SYMLINK+="dut2-stlink"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="3748", ATTR{devpath}=="3.3.4.3.4", SYMLINK+="dut3-stlink"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="3748", ATTR{devpath}=="3.3.3.4",   SYMLINK+="dut4-stlink"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="3748", ATTR{devpath}=="3.3.4.3.3", SYMLINK+="dut5-stlink"
 
-SUBSYSTEM=="tty", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="374b", \
-  ATTRS{serial}=="<SERIAL_uart_1>", SYMLINK+="thub/dut1-uart"
-SUBSYSTEM=="usb", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="374b", \
-  ATTRS{serial}=="<SERIAL_stlink_1>", SYMLINK+="thub/dut1-stlink"
+# FT323RL adaptors map
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6001", ATTR{devpath}=="3.3.3.2",   SYMLINK+="dut1-uart"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6001", ATTR{devpath}=="3.3.4.3.2", SYMLINK+="dut2-uart"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6001", ATTR{devpath}=="3.3.2.4",   SYMLINK+="dut3-uart"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6001", ATTR{devpath}=="3.3.2.2",   SYMLINK+="dut4-uart"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6001", ATTR{devpath}=="3.3.2.3",   SYMLINK+="dut5-uart"
 
-SUBSYSTEM=="tty", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="374b", \
-  ATTRS{serial}=="<SERIAL_uart_2>", SYMLINK+="thub/dut2-uart"
-SUBSYSTEM=="usb", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="374b", \
-  ATTRS{serial}=="<SERIAL_stlink_2>", SYMLINK+="thub/dut2-stlink"
-
-SUBSYSTEM=="tty", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="374b", \
-  ATTRS{serial}=="<SERIAL_uart_3>", SYMLINK+="thub/dut3-uart"
-SUBSYSTEM=="usb", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="374b", \
-  ATTRS{serial}=="<SERIAL_stlink_3>", SYMLINK+="thub/dut3-stlink"
-
-SUBSYSTEM=="tty", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="374b", \
-  ATTRS{serial}=="<SERIAL_uart_4>", SYMLINK+="thub/dut4-uart"
-SUBSYSTEM=="usb", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="374b", \
-  ATTRS{serial}=="<SERIAL_stlink_4>", SYMLINK+="thub/dut4-stlink"
-
-SUBSYSTEM=="tty", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="374b", \
-  ATTRS{serial}=="<SERIAL_uart_5>", SYMLINK+="thub/dut5-uart"
-SUBSYSTEM=="usb", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="374b", \
-  ATTRS{serial}=="<SERIAL_stlink_5>", SYMLINK+="thub/dut5-stlink"
-
-SUBSYSTEM=="tty", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="374b", \
-  ATTRS{serial}=="<SERIAL_uart_6>", SYMLINK+="thub/dut6-uart"
-SUBSYSTEM=="usb", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="374b", \
-  ATTRS{serial}=="<SERIAL_stlink_6>", SYMLINK+="thub/dut6-stlink"
-
-SUBSYSTEM=="tty", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="374b", \
-  ATTRS{serial}=="<SERIAL_uart_7>", SYMLINK+="thub/dut7-uart"
-SUBSYSTEM=="usb", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="374b", \
-  ATTRS{serial}=="<SERIAL_stlink_7>", SYMLINK+="thub/dut7-stlink"
+# DUT board map
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="5740", ATTR{devpath}=="3.2.4",   SYMLINK+="dut1-usb"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="5740", ATTR{devpath}=="3.2.3",   SYMLINK+="dut2-usb"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="5740", ATTR{devpath}=="3.3.3.3", SYMLINK+="dut3-usb"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="5740", ATTR{devpath}=="3.2.2",   SYMLINK+="dut4-usb"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="5740", ATTR{devpath}=="3.4",     SYMLINK+="dut5-usb"
