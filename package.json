@@ -4,7 +4,8 @@
   "description": "thub-client — runs on lab machines, executes test jobs against a DUT (HW) or emulator (SW)",
   "main": "src/daemon.js",
   "bin": {
-    "thub-client": "./src/cli.js"
+    "thub-client": "./src/cli.js",
+    "thub-client-daemon": "./src/daemon.js"
   },
   "scripts": {
     "start": "node src/daemon.js",

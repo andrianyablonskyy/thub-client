@@ -19,6 +19,20 @@ sudo npm install -g @andrian.yablonskyy/thub-client
 # SW only: Docker
 sudo apt install -y docker.io && sudo usermod -aG docker thub
 
+# npm install doesn't create this — write your own, one per DUT slot,
+# named to match the systemd instance you enable below (dut0 -> dut0.json).
+# See "Configuration reference" below for every field and full SW/HW
+# examples.
+sudo mkdir -p /etc/thub
+sudo tee /etc/thub/dut0.json > /dev/null <<'EOF'
+{
+  "coordinatorUrl": "https://thub.example.com",
+  "name": "lab-hw-01",
+  "type": "hw",
+  "joinKey": "<same value as the Coordinator's clientJoinKey>"
+}
+EOF
+
 sudo systemctl enable --now thub-client@dut0
 ```
 
@@ -26,20 +40,24 @@ The systemd unit uses `Restart=always`, `NoNewPrivileges=yes`, `ProtectSystem=st
 
 Both the udev rule and the systemd unit install are best-effort and never fail the `npm install` itself: on a non-Linux machine they're skipped silently (nothing to do), and on Linux without root each just prints its own manual fallback command instead of running it.
 
-## Running it directly (development, or a one-off manual run)
+## Running it directly (no systemd — after a global install, development, or a one-off manual run)
+
+`npm install -g` also gives you `thub-client-daemon`, a direct command for the daemon itself (`thub-client` alone is only the control CLI — lock/unlock/status/stop/restart):
 
 ```bash
-THUB_CLIENT_CONFIG=/etc/thub/dut0.json node src/daemon.js
-node src/daemon.js --config /etc/thub/dut0.json   # equivalent
+THUB_CLIENT_CONFIG=/etc/thub/dut0.json thub-client-daemon
+thub-client-daemon --config /etc/thub/dut0.json   # equivalent
 ```
+
+From a local checkout of this repo (not a global install), the same thing is `node src/daemon.js` in place of `thub-client-daemon`.
 
 Config resolution: `--config`/`-c` flag, or `THUB_CLIENT_CONFIG` env var, → `/etc/thub/dut0.json` → the bundled `config.json` default. Plain JSON only.
 
 **Running several Clients on one host** — start one daemon process per config file, each pointed at its own `dutN.json`; every default path (`tokenFile`, `workDir`, `socketPath`, `pidFile`, `clientIdFile`) is already namespaced by the config file's own basename, so up to 8 instances (`dut0`..`dut7`, one per UART/ST-Link/relay channel) coexist with zero extra setup:
 
 ```bash
-THUB_CLIENT_CONFIG=/etc/thub/dut0.json node src/daemon.js &
-THUB_CLIENT_CONFIG=/etc/thub/dut1.json node src/daemon.js &
+THUB_CLIENT_CONFIG=/etc/thub/dut0.json thub-client-daemon &
+THUB_CLIENT_CONFIG=/etc/thub/dut1.json thub-client-daemon &
 ```
 
 If two instances instead share the exact same config file (told apart only by editing `name` between runs), that namespacing collapses and both register as the *same* resource. Set `clientId` (or `THUB_CLIENT_ID`) and distinct `socketPath`/`pidFile` explicitly in that case.

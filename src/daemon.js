@@ -1,3 +1,5 @@
+#!/usr/bin/env node
+
 /**
  * @file        packages/client/src/daemon.js
  * @description Client daemon core: registration, heartbeat, long-poll, job dispatch and log shipping (README §3.3, §8)
