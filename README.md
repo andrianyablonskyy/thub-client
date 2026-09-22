@@ -38,7 +38,7 @@ sudo systemctl enable --now thub-client@dut0
 
 The systemd unit uses `Restart=always`, `NoNewPrivileges=yes`, `ProtectSystem=strict` and `ReadWritePaths=/var/lib/thub`; the template name (`@dut0`) selects `/etc/thub/dut0.json` so one machine can host multiple DUT slots. Its `ExecStart` is rewritten at install time to this exact install's real `node`/`daemon.js` paths — not just the checked-in file's hardcoded `/usr/lib/node_modules/...` guess — so it works whether Node came from `apt`, `nvm`, or anywhere else.
 
-Both the udev rule and the systemd unit install are best-effort and never fail the `npm install` itself: on a non-Linux machine they're skipped silently (nothing to do), and on Linux without root each just prints its own manual fallback command instead of running it.
+Both the udev rule and the systemd unit install are best-effort and never fail the `npm install` itself, and only ever run for an actual global install (`npm install -g`) — a plain local `npm install` (e.g. in a dev checkout, or as root inside a CI/Docker image, which is common) never touches `/etc/udev` or `/etc/systemd` at all. On a non-Linux machine, or a global install without root, each just prints its own manual fallback command instead of running it.
 
 ## Running it directly (no systemd — after a global install, development, or a one-off manual run)
 
