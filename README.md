@@ -9,10 +9,11 @@ Clients only make **outbound** connections to the [Coordinator](https://github.c
 ```bash
 sudo apt install -y nodejs npm stlink-tools openocd uhubctl
 sudo useradd --system --home /var/lib/thub --groups dialout,plugdev thub
-sudo npm install -g @andrian.yablonskyy/thub-client
 
-# HW only: stable device names
-sudo cp udev/99-thub.rules /etc/udev/rules.d/ && sudo udevadm control --reload
+# HW only: this also installs udev/99-thub.rules to /etc/udev/rules.d
+# and reloads udev, via the package's postinstall script — since npm
+# runs it as root here, no separate manual step is needed.
+sudo npm install -g @andrian.yablonskyy/thub-client
 
 # SW only: Docker
 sudo apt install -y docker.io && sudo usermod -aG docker thub
@@ -22,6 +23,8 @@ sudo systemctl enable --now thub-client@dut0
 ```
 
 The systemd unit uses `Restart=always`, `NoNewPrivileges=yes`, `ProtectSystem=strict` and `ReadWritePaths=/var/lib/thub`; the template name (`@dut0`) selects `/etc/thub/dut0.yaml` so one machine can host multiple DUT slots.
+
+The udev rule install is best-effort and never fails the `npm install` itself: on a non-Linux machine it's skipped silently (nothing to do), and on Linux without root it just prints the manual command (`sudo cp .../udev/99-thub.rules /etc/udev/rules.d/ && sudo udevadm control --reload`) instead of doing it — the same command this used to require every time.
 
 ## Running it directly (development, or a one-off manual run)
 

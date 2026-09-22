@@ -8,6 +8,7 @@
   },
   "scripts": {
     "start": "node src/daemon.js",
+    "postinstall": "node scripts/install-udev-rules.js",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix"
   },
