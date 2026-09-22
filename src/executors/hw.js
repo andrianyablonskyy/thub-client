@@ -13,14 +13,14 @@
 
 'use strict';
 
-const { spawn } = require('node:child_process');
-const { RelayClient } = require('../relay-client');
-const { assertSlotIndex } = require('../config');
+const { spawn } = require('node:child_process'),
+  { RelayClient } = require('../relay-client'),
+  { assertSlotIndex } = require('../config');
 
 // §8.2 HW executor: flashes a physical DUT over ST-Link and exposes its
 // UART. Stable device paths come from udev rules (udev/99-thub.rules),
 // so a replug doesn't change the config.
-function run(cmd, args) {
+function run(cmd, args){
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'] });
     let out = '';
@@ -31,20 +31,20 @@ function run(cmd, args) {
   });
 }
 
-class HwExecutor {
-  constructor(config, logShipper) {
+class HwExecutor{
+  constructor(config, logShipper){
     this.config = config.hw || {};
     this.logShipper = logShipper;
     this.serialPort = null;
   }
 
-  async prepare(job, firmwarePath) {
-    const { flashAddress } = job.spec.firmware;
-    const addr = flashAddress || '0x08000000';
-    const serial = this.config.stlinkSerial;
-    const args = serial
-      ? ['--serial', serial, '--reset', 'write', firmwarePath, addr]
-      : ['--reset', 'write', firmwarePath, addr];
+  async prepare(job, firmwarePath){
+    const { flashAddress } = job.spec.firmware,
+      addr = flashAddress || '0x08000000',
+      serial = this.config.stlinkSerial,
+      args = serial
+        ? ['--serial', serial, '--reset', 'write', firmwarePath, addr]
+        : ['--reset', 'write', firmwarePath, addr];
 
     this.logShipper.push('flash', `st-flash ${args.join(' ')}`);
     const output = await run('st-flash', args);
@@ -52,42 +52,46 @@ class HwExecutor {
     await this._openUart();
   }
 
-  async _openUart() {
+  async _openUart(){
     const uartCfg = this.config.uart;
-    if (!uartCfg) return;
+    if (!uartCfg){
+      return;
+    }
     let SerialPort;
     try {
       ({ SerialPort } = require('serialport'));
-    } catch {
+    }
+    catch {
       throw new Error(
-        "HW executor needs the 'serialport' package installed on the Client host (npm install serialport)"
+        'HW executor needs the \'serialport\' package installed on the Client host (npm install serialport)'
       );
     }
     this.serialPort = new SerialPort({ path: uartCfg.path, baudRate: uartCfg.baudRate || 115200 });
     this.serialPort.on('data', (buf) => this.logShipper.push('uart', buf.toString('utf8').trimEnd()));
   }
 
-  envFor() {
+  envFor(){
     const uartCfg = this.config.uart;
     return uartCfg ? { THUB_DUT_UART: uartCfg.path } : {};
   }
 
-  async teardown() {
-    if (this.config.power?.method === 'uhubctl' && this.config.power.hub) {
+  async teardown(){
+    if (this.config.power?.method === 'uhubctl' && this.config.power.hub){
       await run('uhubctl', ['-l', this.config.power.hub, '-p', String(this.config.power.port), '-a', 'cycle']).catch(
         () => {}
       );
-    } else if (this.config.power?.method === 'relay') {
+    }
+    else if (this.config.power?.method === 'relay'){
       await this._relayCycle().catch((err) => this.logShipper.push('flash', `relay cycle failed: ${err.message}`));
     }
-    if (this.serialPort?.isOpen) {
+    if (this.serialPort?.isOpen){
       await new Promise((resolve) => this.serialPort.close(resolve));
     }
     this.serialPort = null;
   }
 
   // STUB power control via a relay board's REST API — see relay-client.js.
-  async _relayCycle() {
+  async _relayCycle(){
     const { relayIndex, baseUrl } = this.config.power;
     assertSlotIndex('hw.power.relayIndex', relayIndex);
     const relay = new RelayClient(baseUrl);
@@ -98,7 +102,7 @@ class HwExecutor {
   }
 }
 
-function sleep(ms) {
+function sleep(ms){
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 

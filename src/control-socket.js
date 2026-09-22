@@ -13,11 +13,11 @@
 
 'use strict';
 
-const fs = require('node:fs');
-const net = require('node:net');
+const fs = require('node:fs'),
+  net = require('node:net');
 
 // §8.4: "The command talks to the daemon over its Unix socket."
-function createControlSocketServer(socketPath, handlers) {
+function createControlSocketServer(socketPath, handlers){
   fs.mkdirSync(require('node:path').dirname(socketPath), { recursive: true });
   fs.rmSync(socketPath, { force: true });
 
@@ -26,15 +26,20 @@ function createControlSocketServer(socketPath, handlers) {
     socket.on('data', async (chunk) => {
       buf += chunk;
       const nl = buf.indexOf('\n');
-      if (nl === -1) return;
+      if (nl === -1){
+        return;
+      }
       const line = buf.slice(0, nl);
       try {
-        const { cmd, ...args } = JSON.parse(line);
-        const handler = handlers[cmd];
-        if (!handler) throw new Error(`Unknown command ${cmd}`);
+        const { cmd, ...args } = JSON.parse(line),
+          handler = handlers[cmd];
+        if (!handler){
+          throw new Error(`Unknown command ${cmd}`);
+        }
         const result = await handler(args);
         socket.end(JSON.stringify({ ok: true, ...result }) + '\n');
-      } catch (err) {
+      }
+      catch (err){
         socket.end(JSON.stringify({ ok: false, error: err.message }) + '\n');
       }
     });
@@ -44,7 +49,7 @@ function createControlSocketServer(socketPath, handlers) {
   return server;
 }
 
-function sendCommand(socketPath, payload) {
+function sendCommand(socketPath, payload){
   return new Promise((resolve, reject) => {
     const socket = net.createConnection(socketPath);
     let buf = '';
@@ -53,7 +58,8 @@ function sendCommand(socketPath, payload) {
     socket.on('close', () => {
       try {
         resolve(JSON.parse(buf));
-      } catch {
+      }
+      catch {
         reject(new Error('Malformed response from thub-client daemon'));
       }
     });
