@@ -157,9 +157,9 @@ function assertDeviceIndex(field, index){
   }
 }
 
-// Symlink format from udev/99-thub.rules: /dev/dut<N>-uart|usb|stlink.
+// Symlink format from udev/99-thub.rules: /dev/thub/dut<N>-uart|usb|stlink.
 function devicePath(index, kind){
-  return `/dev/dut${index}-${kind}`;
+  return `/dev/thub/dut${index}-${kind}`;
 }
 
 function assertListSize(field, list){

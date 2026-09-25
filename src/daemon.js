@@ -21,6 +21,7 @@ const fs = require('node:fs'),
   { ClientApiClient } = require('./api-client'),
   { createControlSocketServer } = require('./control-socket'),
   { JobRunner } = require('./runner'),
+  { describeCapabilities } = require('./capabilities'),
   { PACKAGES, isNewer } = require('@andrian.yablonskyy/thub-common'),
   { version } = require('../package.json');
 
@@ -97,7 +98,8 @@ class Daemon{
           type: this.config.type,
           labels: this.config.labels,
           groups: this.config.groups,
-          hostInfo: { hostname: os.hostname(), platform: process.platform, addresses: localAddresses() }
+          hostInfo: { hostname: os.hostname(), platform: process.platform, addresses: localAddresses() },
+          capabilities: describeCapabilities(this.config)
         });
       writeCredentials(this.config.tokenFile, { resourceId, resourceToken });
       this.resourceId = resourceId;

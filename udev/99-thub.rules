@@ -4,7 +4,7 @@
 # adapter / ST-Link probe serial number (`udevadm info -a` on the device).
 #
 # A Client's hw.uarts / hw.usbs / hw.stlinks entries (up to 8 each) use
-# these symlinks: index N resolves to /dev/dut<N>-uart|usb|stlink. For an
+# these symlinks: index N resolves to /dev/thub/dut<N>-uart|usb|stlink. For an
 # ST-Link, the Client reads the probe's serial from its symlink via udevadm,
 # since st-flash selects probes by serial, not by device path.
 

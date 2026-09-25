@@ -14,7 +14,7 @@ That one command is the complete installation. Run as root on Linux, for the use
 
 - create `~/.config/thub` and `~/var/lib/thub/client` (with `work/`) — the state directory for tokens, client ids, job workspaces, control sockets and pidfiles;
 - create `~/.config/thub/client.json` (0600) if it doesn't exist yet, with blank `coordinatorUrl`/`joinKey`, `type: hw` and `varDir` pointing at the state directory — a re-install/upgrade never overwrites it;
-- install `udev/99-thub.rules` to `/etc/udev/rules.d` (stable `/dev/dut<N>-uart|usb|stlink` paths for HW Clients) and reload udev;
+- install `udev/99-thub.rules` to `/etc/udev/rules.d` (stable `/dev/thub/dut<N>-uart|usb|stlink` paths for HW Clients) and reload udev;
 - install `/etc/systemd/system/thub-client@.service`, rendered for that user: `User=`/`Group=`, `SupplementaryGroups=` whichever of `dialout`, `plugdev` and `docker` exist on the host, `THUB_CLIENT_CONFIG=~/.config/thub/%i.json`, the state directory as `WorkingDirectory=`/`ReadWritePaths=`, and `ExecStart` pointing at this install's real `node`/`daemon.js` (works with `apt`-installed Node, `nvm` or any npm prefix) with `--name %i`, so each instance registers under its own instance name;
 - install and enable `thub-client-update.path`/`.service`, the root helper that applies self-updates requested from the Coordinator (see "Updates" below);
 - enable and (re)start `thub-client@client` once `client.json` is filled in, and restart every other running `thub-client@*` instance, so an upgrade takes effect immediately.
@@ -105,11 +105,13 @@ If two instances instead share the exact same config file (told apart only by `n
 | `artifactory.tokenFile` | No | — | Path to the Client's own read-only Artifactory token. |
 | `artifactory.allowedArtifactPrefixes` | No | `[]` | Job `firmware.url`/`tests.url` must start with one of these. |
 
+**Capabilities.** At every registration (each start/restart) the Client reports what this config lets it drive: for HW each `hw.stlinks`/`uarts`/`usbs` device (path, ST-Link serial, UART baud rate, and whether the device node exists right now), `hw.relays` and `hw.power`; for SW the image, its source and the CPU/memory limits. The Coordinator's resource card lists them and flags a configured device that's missing. After plugging in or moving an adapter, restart the instance to refresh them.
+
 **SW-only** (`type: sw`): `sw.image` (required — a plain repository name like `dut-emulator:2026.08`), `sw.registry` (local registry `host[:port]`), `sw.registryAuth` (`{ username, passwordFile | password }`), `sw.allowDockerHub` (default `false`), `sw.cpus` (default 2), `sw.memory` (default `2g`).
 
 The image is looked up in order: `sw.registry` first, then Docker Hub only if `sw.allowDockerHub` is `true`, and if neither has it the job fails with the reason for each source. An image already cached on the host counts for its source. An image that names its own registry host (`other.example.com/emu:1`) is pulled from that host only. A plain-HTTP registry must also be in the Docker daemon's `insecure-registries`.
 
-**HW-only** (`type: hw`): up to 8 each of `hw.stlinks`, `hw.uarts`, `hw.usbs` (entries: udev index 1–8 → `/dev/dut<N>-stlink|uart|usb`, a path, or `{ index | path, ... }`; ST-Link entries may give `serial`, UARTs `baudRate`) and `hw.relays` (`{ channel: 0-7, baseUrl }`), plus `hw.power.method` (`uhubctl` or `relay`) and `hw.power.hub`/`.port` or `.baseUrl`. The legacy `hw.stlinkSerial`, `hw.uart` and `hw.power.relayIndex` still work.
+**HW-only** (`type: hw`): up to 8 each of `hw.stlinks`, `hw.uarts`, `hw.usbs` (entries: udev index 1–8 → `/dev/thub/dut<N>-stlink|uart|usb`, a path, or `{ index | path, ... }`; ST-Link entries may give `serial`, UARTs `baudRate`) and `hw.relays` (`{ channel: 0-7, baseUrl }`), plus `hw.power.method` (`uhubctl` or `relay`) and `hw.power.hub`/`.port` or `.baseUrl`. The legacy `hw.stlinkSerial`, `hw.uart` and `hw.power.relayIndex` still work.
 
 Example SW config:
 
@@ -168,7 +170,7 @@ A cancel command or job timeout sends `SIGTERM` to the test process group, waits
 
 ### HW executor
 
-ST-Link via `st-flash`/`openocd`, UART via the `serialport` npm package, optional power cycling via `uhubctl` or a networked relay board's REST API (`hw.power.method: "relay"` — a **stub**, `src/relay-client.js`, pending the real board's API spec). Stable device paths come from udev rules (`/dev/dut<N>-uart`, `/dev/dut<N>-usb`, `/dev/dut<N>-stlink`, N = 1–8). The job's firmware is flashed through the first ST-Link; every device is passed to the test runner as `THUB_DUT_UART_<n>`/`THUB_DUT_USB_<n>`/`THUB_DUT_STLINK_<n>`.
+ST-Link via `st-flash`/`openocd`, UART via the `serialport` npm package, optional power cycling via `uhubctl` or a networked relay board's REST API (`hw.power.method: "relay"` — a **stub**, `src/relay-client.js`, pending the real board's API spec). Stable device paths come from udev rules (`/dev/thub/dut<N>-uart`, `/dev/thub/dut<N>-usb`, `/dev/thub/dut<N>-stlink`, N = 1–8). The job's firmware is flashed through the first ST-Link; every device is passed to the test runner as `THUB_DUT_UART_<n>`/`THUB_DUT_USB_<n>`/`THUB_DUT_STLINK_<n>`.
 
 ### SW executor
 
