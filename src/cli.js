@@ -2,7 +2,8 @@
 
 /**
  * @file        packages/client/src/cli.js
- * @description thub-client control CLI: lock/unlock/status/stop/restart against the local daemon (README §8.4)
+ * @description thub-client control CLI: lock/unlock/status/stop/restart against the local daemon, and
+ *              register/deregister of Client instances on this host (README §8.4)
  *
  * @author      Andrian Yablonskyy
  * @copyright   Copyright (c) 2026 Andrian Yablonskyy. All rights reserved.
@@ -20,7 +21,8 @@ const fs = require('node:fs'),
   { spawn } = require('node:child_process'),
   { Command } = require('commander'),
   { loadConfig } = require('./config'),
-  { sendCommand } = require('./control-socket');
+  { sendCommand } = require('./control-socket'),
+  { register, deregister } = require('./instances');
 
 const DAEMON_ENTRY = path.join(__dirname, 'daemon.js'),
   // Bounded by runner.js's KILL_GRACE_MS (10s) for an active job's SIGTERM
@@ -169,5 +171,30 @@ program
     }
     console.log(`Restarted (pid ${pid}).`);
   });
+
+// Instance management (README "Several DUT slots on one host"): the
+// instance's config file plus its thub-client@<name> systemd unit.
+function runOrExit(fn){
+  try {
+    fn();
+  }
+  catch (err){
+    console.error(`Error: ${err.message}`);
+    process.exit(1);
+  }
+}
+
+program
+  .command('register')
+  .description('Create (or update) the ~/.config/thub/<name>.json instance and enable/start thub-client@<name>')
+  .option('-n, --name <name>', 'Instance name — also the Client\'s resource name', 'client')
+  .option('-t, --type <type>', 'Client type: hw or sw', 'hw')
+  .action((opts) => runOrExit(() => register(opts.name, opts.type)));
+
+program
+  .command('deregister')
+  .description('Stop/disable thub-client@<name> and remove its config (client.json itself is kept)')
+  .option('-n, --name <name>', 'Instance name', 'client')
+  .action((opts) => runOrExit(() => deregister(opts.name)));
 
 program.parseAsync(process.argv);
