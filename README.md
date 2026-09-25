@@ -40,12 +40,15 @@ journalctl -u thub-client@client -f
 
 The service is started as `thub-client@<instance>.service`. The instance name does two things: it selects the config file (`thub-client@<instance>` reads `~/.config/thub/<instance>.json`), and it is passed to the daemon as `--name <instance>`, which becomes the Client's resource name and overrides any `name` in that file. So the default `thub-client@client` registers as `client`.
 
-**Several DUT slots on one host.** Add one config file per slot and enable its instance — `thub-client@dut1` reads `~/.config/thub/dut1.json` and registers as `dut1`:
+**Several DUT slots on one host.** Register one instance per slot — `thub-client register` creates `~/.config/thub/<name>.json` from `client.json` (same `coordinatorUrl`/`joinKey`/`varDir`, the given `type`, no `name`), then enables and starts `thub-client@<name>` (it starts it only once `coordinatorUrl` and `joinKey` are set, and runs `systemctl` through `sudo` if you aren't root):
 
 ```bash
-cp ~/.config/thub/client.json ~/.config/thub/dut1.json   # then edit hw for slot 1
-sudo systemctl enable --now thub-client@dut1
+thub-client register --name dut1 --type hw   # then edit hw in ~/.config/thub/dut1.json for slot 1
+thub-client register --name emu1 --type sw
+thub-client deregister --name dut1           # stop + disable thub-client@dut1, remove dut1.json
 ```
+
+`--name` defaults to `client` and `--type` to `hw`. Registering an existing instance keeps its config and only updates `type`. Deregistering keeps `client.json` (the template for new instances) and the instance's state under `varDir`, so re-registering the same name comes back as the same resource. Doing it by hand is equivalent: copy `client.json` to `dut1.json`, then `sudo systemctl enable --now thub-client@dut1`.
 
 Keep `varDir` at the one in `client.json` — the service can only write there, and every per-instance path under it is already namespaced by the config's filename. If you change `client.json`'s `varDir`/`runDir`, re-run `sudo npm i -g @andrian.yablonskyy/thub-client` so the unit's `ReadWritePaths=` follows.
 
@@ -121,6 +124,8 @@ Example SW config:
 ## `thub-client` — the control CLI
 
 ```bash
+thub-client register [--name client] [--type hw]   # add/update an instance (see "Several DUT slots")
+thub-client deregister [--name client]             # remove it
 thub-client lock --reason "debugging I2C"   # -> BUSY (source=local)
 thub-client unlock                           # -> IDLE
 thub-client status
