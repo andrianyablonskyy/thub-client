@@ -13,9 +13,9 @@ sudo npm i -g @andrian.yablonskyy/thub-client
 That one command is the complete installation. Run as root on Linux, for the user who ran `sudo` (`SUDO_USER` — not root; that user owns every file and runs the service), the package's postinstall scripts:
 
 - create `~/.config/thub` and `~/var/lib/thub/client` (with `work/`) — the state directory for tokens, client ids, job workspaces, control sockets and pidfiles;
-- create `~/.config/thub/client.json` (0600) if it doesn't exist yet, with blank `coordinatorUrl`/`name`/`joinKey`, `type: hw` and `varDir` pointing at the state directory — a re-install/upgrade never overwrites it;
+- create `~/.config/thub/client.json` (0600) if it doesn't exist yet, with blank `coordinatorUrl`/`joinKey`, `type: hw` and `varDir` pointing at the state directory — a re-install/upgrade never overwrites it;
 - install `udev/99-thub.rules` to `/etc/udev/rules.d` (stable `/dev/dut<N>-uart|usb|stlink` paths for HW Clients) and reload udev;
-- install `/etc/systemd/system/thub-client@.service`, rendered for that user: `User=`/`Group=`, `SupplementaryGroups=` whichever of `dialout`, `plugdev` and `docker` exist on the host, `THUB_CLIENT_CONFIG=~/.config/thub/%i.json`, the state directory as `WorkingDirectory=`/`ReadWritePaths=`, and `ExecStart` pointing at this install's real `node`/`daemon.js` (works with `apt`-installed Node, `nvm` or any npm prefix);
+- install `/etc/systemd/system/thub-client@.service`, rendered for that user: `User=`/`Group=`, `SupplementaryGroups=` whichever of `dialout`, `plugdev` and `docker` exist on the host, `THUB_CLIENT_CONFIG=~/.config/thub/%i.json`, the state directory as `WorkingDirectory=`/`ReadWritePaths=`, and `ExecStart` pointing at this install's real `node`/`daemon.js` (works with `apt`-installed Node, `nvm` or any npm prefix) with `--name %i`, so each instance registers under its own instance name;
 - enable and (re)start `thub-client@client` once `client.json` is filled in, and restart every other running `thub-client@*` instance, so an upgrade takes effect immediately.
 
 On a fresh install the service isn't started yet — the daemon would exit at once with blank required fields. Fill in the config, then start it (below).
@@ -30,7 +30,7 @@ sudo apt install -y docker.io
 
 sudo npm i -g @andrian.yablonskyy/thub-client
 
-# coordinatorUrl, name, type and joinKey (the Coordinator's clientJoinKey);
+# coordinatorUrl, type and joinKey (the Coordinator's clientJoinKey);
 # see "Configuration reference" below for every field
 nano ~/.config/thub/client.json
 
@@ -38,10 +38,12 @@ sudo systemctl enable --now thub-client@client
 journalctl -u thub-client@client -f
 ```
 
-**Several DUT slots on one host.** The systemd instance name selects the config file — `thub-client@dut1` reads `~/.config/thub/dut1.json` — so add one file per slot and enable its instance:
+The service is started as `thub-client@<instance>.service`. The instance name does two things: it selects the config file (`thub-client@<instance>` reads `~/.config/thub/<instance>.json`), and it is passed to the daemon as `--name <instance>`, which becomes the Client's resource name and overrides any `name` in that file. So the default `thub-client@client` registers as `client`.
+
+**Several DUT slots on one host.** Add one config file per slot and enable its instance — `thub-client@dut1` reads `~/.config/thub/dut1.json` and registers as `dut1`:
 
 ```bash
-cp ~/.config/thub/client.json ~/.config/thub/dut1.json   # then edit name/hw for slot 1
+cp ~/.config/thub/client.json ~/.config/thub/dut1.json   # then edit hw for slot 1
 sudo systemctl enable --now thub-client@dut1
 ```
 
@@ -56,7 +58,10 @@ Every install step is best-effort and never fails the `npm install` itself, and 
 ```bash
 THUB_CLIENT_CONFIG=/etc/thub/dut0.json thub-client-daemon
 thub-client-daemon --config /etc/thub/dut0.json   # equivalent
+thub-client-daemon --config /etc/thub/dut0.json --name lab-hw-01   # override the config's name
 ```
+
+`--name`/`-n` overrides the config file's `name`; the systemd unit uses it to pass the instance name.
 
 From a local checkout of this repo (not a global install), the same thing is `node src/daemon.js` in place of `thub-client-daemon`.
 
@@ -71,14 +76,14 @@ THUB_CLIENT_CONFIG=/etc/thub/dut0.json thub-client-daemon &
 THUB_CLIENT_CONFIG=/etc/thub/dut1.json thub-client-daemon &
 ```
 
-If two instances instead share the exact same config file (told apart only by editing `name` between runs), that namespacing collapses and both register as the *same* resource. Set `clientId` (or `THUB_CLIENT_ID`) and distinct `socketPath`/`pidFile` explicitly in that case.
+If two instances instead share the exact same config file (told apart only by `name`), that namespacing collapses and both register as the *same* resource. Set `clientId` (or `THUB_CLIENT_ID`) and distinct `socketPath`/`pidFile` explicitly in that case (and tell them apart with `--name` rather than editing the file).
 
 ## Configuration reference
 
 | Field | Required | Default | Meaning |
 |---|---|---|---|
 | `coordinatorUrl` | Yes | — | Base URL of the Coordinator. |
-| `name` | Yes | — | Resource name. Identity is actually `clientId` — renaming is safe. |
+| `name` | No | config file's basename | Resource name. Overridden by the daemon's `--name` — under systemd, the instance name (`thub-client@<name>`), so it is ignored there. Identity is actually `clientId` — renaming is safe. |
 | `type` | Yes | — | `hw` or `sw`. |
 | `labels` | No | `[]` | Fully replaces the resource's labels on every registration. |
 | `groups` | No | `[]` | Which resource group(s) this Client is a member of — fully replaces membership on every registration. |

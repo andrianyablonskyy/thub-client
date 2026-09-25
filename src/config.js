@@ -35,8 +35,12 @@ const USER_CONFIG_PATH = path.join(os.homedir(), '.config', 'thub', 'client.json
   // udev/99-thub.rules and a relay board's 8 channels (§8.2, §8.6).
   MAX_SLOTS = 8;
 
-// Matches README.md §13 (~/.config/thub/client.json).
-function loadConfig(configPath = process.env.THUB_CLIENT_CONFIG){
+// Matches README.md §13 (~/.config/thub/client.json). `overrides.name` (the
+// daemon's --name, which the systemd unit sets to its instance name) wins
+// over the file's `name`, which in turn defaults to the config file's
+// basename — the same thing as the systemd instance name, so the control
+// CLI (which never gets --name) loads a name-less config fine too.
+function loadConfig(configPath = process.env.THUB_CLIENT_CONFIG, overrides = {}){
   const candidate = [configPath, USER_CONFIG_PATH, PACKAGE_DEFAULT_CONFIG_PATH].find(
     (p) => p && fs.existsSync(p)
   );
@@ -71,7 +75,7 @@ function loadConfig(configPath = process.env.THUB_CLIENT_CONFIG){
 
     config = {
       coordinatorUrl: raw.coordinatorUrl,
-      name: raw.name,
+      name: overrides.name || raw.name || instance,
       type: raw.type,
       labels: raw.labels || [],
       // Which resource group(s) this Client belongs to (README §13.1) — a
@@ -96,8 +100,8 @@ function loadConfig(configPath = process.env.THUB_CLIENT_CONFIG){
       configPath: candidate
     };
 
-  if (!config.coordinatorUrl || !config.name || !config.type){
-    throw new Error('Client config requires coordinatorUrl, name and type');
+  if (!config.coordinatorUrl || !config.type){
+    throw new Error('Client config requires coordinatorUrl and type');
   }
 
   // The Coordinator identifies this Client by this id (registry.registerAuto,

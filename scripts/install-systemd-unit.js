@@ -59,7 +59,7 @@ function renderUnit(user, paths){
     .replace(/^SupplementaryGroups=.*$/m, groups ? `SupplementaryGroups=${groups}` : '')
     .replace(/^Environment=THUB_CLIENT_CONFIG=.*$/m, `Environment=THUB_CLIENT_CONFIG=${paths.configDir}/%i.json`)
     .replace(/^WorkingDirectory=.*$/m, `WorkingDirectory=${paths.varDir}`)
-    .replace(/^ExecStart=.*$/m, `ExecStart=${process.execPath} ${DAEMON_PATH}`)
+    .replace(/^ExecStart=.*$/m, `ExecStart=${process.execPath} ${DAEMON_PATH} --name %i`)
     .replace(/^ReadWritePaths=.*$/m, `ReadWritePaths=${writable}`);
 }
 
@@ -68,7 +68,7 @@ function renderUnit(user, paths){
 // unit would just crash-loop until systemd's start limit gives up.
 function isConfigured(paths){
   const raw = readConfig(paths.configPath);
-  if (!raw.coordinatorUrl || !raw.name || !raw.type){
+  if (!raw.coordinatorUrl || !raw.type){
     return false;
   }
   return Boolean(raw.joinKey) || fs.existsSync(raw.tokenFile || path.join(paths.varDir, `${paths.instance}.token`));
@@ -123,7 +123,7 @@ function main(){
     }
     if (!restart.has(defaultUnit)){
       console.log(
-        `thub-client: set coordinatorUrl/name/joinKey in ${paths.configPath}, then start it with:\n` +
+        `thub-client: set coordinatorUrl/joinKey in ${paths.configPath}, then start it with:\n` +
           `  sudo systemctl enable --now ${defaultUnit}`
       );
     }

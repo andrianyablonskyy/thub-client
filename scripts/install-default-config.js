@@ -24,15 +24,15 @@ const fs = require('node:fs'),
 // coordinatorUrl, a placeholder joinKey and a specific hw example for
 // zero-setup `npm run client` in the monorepo). A real install instead gets
 // empty required fields so config.js's own validation fails loudly until
-// you set coordinatorUrl/name/joinKey for real, rather than silently
+// you set coordinatorUrl/joinKey for real, rather than silently
 // registering as an instance nobody meant to create with a shared
-// placeholder joinKey. varDir is home-anchored, not cwd-relative (config.js
+// placeholder joinKey. No `name`: the systemd unit passes its instance name
+// (thub-client@<name>) as --name. varDir is home-anchored, not cwd-relative (config.js
 // defaults it to <cwd>/.data), so the daemon, the control CLI and the
 // systemd unit all agree on where tokens, sockets and pidfiles live.
 function defaultContent(paths){
   return {
     coordinatorUrl: '',
-    name: '',
     type: 'hw',
     labels: [],
     groups: [],
@@ -87,7 +87,7 @@ function main(){
     if (!fs.existsSync(paths.configPath)){
       fs.writeFileSync(paths.configPath, JSON.stringify(defaultContent(paths), null, 2) + '\n', { mode: 0o600 });
       chownToUser(paths.configPath, user);
-      console.log(`thub-client: created ${paths.configPath} — set coordinatorUrl/name/joinKey before starting the Client`);
+      console.log(`thub-client: created ${paths.configPath} — set coordinatorUrl/joinKey before starting the Client`);
     }
     console.log(`thub-client: state directory is ${paths.varDir}`);
   }
