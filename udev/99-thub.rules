@@ -9,22 +9,22 @@
 # since st-flash selects probes by serial, not by device path.
 
 # ST Links maps
-SUBSYSTEM=="usb", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="3748", ATTR{devpath}=="3.3.4.3.1", SYMLINK+="dut1-stlink"
-SUBSYSTEM=="usb", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="3748", ATTR{devpath}=="3.3.4.2",   SYMLINK+="dut2-stlink"
-SUBSYSTEM=="usb", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="3748", ATTR{devpath}=="3.3.4.3.4", SYMLINK+="dut3-stlink"
-SUBSYSTEM=="usb", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="3748", ATTR{devpath}=="3.3.3.4",   SYMLINK+="dut4-stlink"
-SUBSYSTEM=="usb", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="3748", ATTR{devpath}=="3.3.4.3.3", SYMLINK+="dut5-stlink"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="3748", ATTR{devpath}=="3.3.4.3.1", SYMLINK+="thub/dut1-stlink"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="3748", ATTR{devpath}=="3.3.4.2",   SYMLINK+="thub/dut2-stlink"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="3748", ATTR{devpath}=="3.3.4.3.4", SYMLINK+="thub/dut3-stlink"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="3748", ATTR{devpath}=="3.3.3.4",   SYMLINK+="thub/dut4-stlink"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="3748", ATTR{devpath}=="3.3.4.3.3", SYMLINK+="thub/dut5-stlink"
 
 # FT323RL adaptors map
-SUBSYSTEM=="usb", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6001", ATTR{devpath}=="3.3.3.2",   SYMLINK+="dut1-uart"
-SUBSYSTEM=="usb", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6001", ATTR{devpath}=="3.3.4.3.2", SYMLINK+="dut2-uart"
-SUBSYSTEM=="usb", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6001", ATTR{devpath}=="3.3.2.4",   SYMLINK+="dut3-uart"
-SUBSYSTEM=="usb", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6001", ATTR{devpath}=="3.3.2.2",   SYMLINK+="dut4-uart"
-SUBSYSTEM=="usb", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6001", ATTR{devpath}=="3.3.2.3",   SYMLINK+="dut5-uart"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6001", ATTR{devpath}=="3.3.3.2",   SYMLINK+="thub/dut1-uart"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6001", ATTR{devpath}=="3.3.4.3.2", SYMLINK+="thub/dut2-uart"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6001", ATTR{devpath}=="3.3.2.4",   SYMLINK+="thub/dut3-uart"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6001", ATTR{devpath}=="3.3.2.2",   SYMLINK+="thub/dut4-uart"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6001", ATTR{devpath}=="3.3.2.3",   SYMLINK+="thub/dut5-uart"
 
 # DUT board map
-SUBSYSTEM=="usb", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="5740", ATTR{devpath}=="3.2.4",   SYMLINK+="dut1-usb"
-SUBSYSTEM=="usb", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="5740", ATTR{devpath}=="3.2.3",   SYMLINK+="dut2-usb"
-SUBSYSTEM=="usb", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="5740", ATTR{devpath}=="3.3.3.3", SYMLINK+="dut3-usb"
-SUBSYSTEM=="usb", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="5740", ATTR{devpath}=="3.2.2",   SYMLINK+="dut4-usb"
-SUBSYSTEM=="usb", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="5740", ATTR{devpath}=="3.4",     SYMLINK+="dut5-usb"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="5740", ATTR{devpath}=="3.2.4",   SYMLINK+="thub/dut1-usb"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="5740", ATTR{devpath}=="3.2.3",   SYMLINK+="thub/dut2-usb"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="5740", ATTR{devpath}=="3.3.3.3", SYMLINK+="thub/dut3-usb"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="5740", ATTR{devpath}=="3.2.2",   SYMLINK+="thub/dut4-usb"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="5740", ATTR{devpath}=="3.4",     SYMLINK+="thub/dut5-usb"
