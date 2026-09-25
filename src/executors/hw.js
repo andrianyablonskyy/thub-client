@@ -18,7 +18,7 @@ const { spawn } = require('node:child_process'),
 
 // §8.2 HW executor: flashes a physical DUT over ST-Link and exposes its
 // UARTs/USB devices. Stable device paths come from udev rules
-// (udev/99-thub.rules, /dev/dut<N>-uart|usb|stlink), so a replug doesn't
+// (udev/99-thub.rules, /dev/thub/dut<N>-uart|usb|stlink), so a replug doesn't
 // change the config. config.js has already resolved every hw.* list.
 function run(cmd, args){
   return new Promise((resolve, reject) => {
@@ -32,7 +32,7 @@ function run(cmd, args){
 }
 
 // st-flash selects a probe by serial, not by device node — so a
-// /dev/dut<N>-stlink symlink is resolved to its probe's USB serial via udev.
+// /dev/thub/dut<N>-stlink symlink is resolved to its probe's USB serial via udev.
 async function stlinkSerialFromPath(devPath){
   const out = await run('udevadm', ['info', '--query=property', `--name=${devPath}`]),
     match = out.match(/^ID_SERIAL_SHORT=(.+)$/m);
