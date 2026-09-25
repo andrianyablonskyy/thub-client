@@ -66,7 +66,7 @@ function resolveTargetUser(){
 function targetPaths(user){
   const configDir = path.join(user.home, '.config', 'thub'),
     configPath = path.join(configDir, `${DEFAULT_INSTANCE}.json`),
-    defaultVarDir = path.join(user.home, 'var', 'lib', 'thub', 'client'),
+    defaultVarDir = path.join(user.home, '.thub', 'client'),
     raw = readConfig(configPath),
     varDir = absolute(raw.varDir) || defaultVarDir,
     runDir = absolute(raw.runDir) || varDir;
