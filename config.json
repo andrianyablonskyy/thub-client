@@ -1,5 +1,5 @@
 {
-  "coordinatorUrl": "http://localhost:8000",
+  "coordinatorUrl": "https://coord.yablonskyy.com",
   "name": "lab-hw-01",
   "type": "hw",
   "labels": [],
@@ -12,9 +12,11 @@
     "allowedArtifactPrefixes": ["https://artifactory.example.com/fw-local/"]
   },
   "hw": {
-    "stlinkSerial": "066DFF485550755187121234",
-    "uart": { "path": "/dev/thub/dut0-uart", "baudRate": 115200 },
-    "power": { "method": "uhubctl", "hub": "1-1", "port": 2 }
+    "stlinks": [{ "path": "/dev/dut1-stlink" }],
+    "uarts": [{ "path": "/dev/dut1-uart", "baudRate": 115200 }],
+    "usbs": [{ "path": "/dev/dut1-usb" }],
+    "relays": [{ "channel": 0, "baseUrl": "http://localhost:3000" }],
+    "power": { "method": "relay" }
   },
   "sw": {
     "image": "dockerhub.io/ubuntu:minimal",

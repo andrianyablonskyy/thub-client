@@ -97,7 +97,7 @@ If two instances instead share the exact same config file (told apart only by ed
 
 **SW-only** (`type: sw`): `sw.image` (required), `sw.cpus` (default 2), `sw.memory` (default `2g`).
 
-**HW-only** (`type: hw`): `hw.stlinkSerial`, `hw.uart.index`/`.path`/`.baudRate`, `hw.power.method` (`uhubctl` or `relay`), `hw.power.hub`/`.port` or `.relayIndex`/`.baseUrl`.
+**HW-only** (`type: hw`): up to 8 each of `hw.stlinks`, `hw.uarts`, `hw.usbs` (entries: udev index 1–8 → `/dev/dut<N>-stlink|uart|usb`, a path, or `{ index | path, ... }`; ST-Link entries may give `serial`, UARTs `baudRate`) and `hw.relays` (`{ channel: 0-7, baseUrl }`), plus `hw.power.method` (`uhubctl` or `relay`) and `hw.power.hub`/`.port` or `.baseUrl`. The legacy `hw.stlinkSerial`, `hw.uart` and `hw.power.relayIndex` still work.
 
 Example SW config:
 
@@ -145,7 +145,7 @@ A cancel command or job timeout sends `SIGTERM` to the test process group, waits
 
 ### HW executor
 
-ST-Link via `st-flash`/`openocd`, UART via the `serialport` npm package, optional power cycling via `uhubctl` or a networked relay board's REST API (`hw.power.method: "relay"` — a **stub**, `src/relay-client.js`, pending the real board's API spec). Stable device paths come from udev rules (`/dev/thub/dut0-uart`, etc.).
+ST-Link via `st-flash`/`openocd`, UART via the `serialport` npm package, optional power cycling via `uhubctl` or a networked relay board's REST API (`hw.power.method: "relay"` — a **stub**, `src/relay-client.js`, pending the real board's API spec). Stable device paths come from udev rules (`/dev/dut<N>-uart`, `/dev/dut<N>-usb`, `/dev/dut<N>-stlink`, N = 1–8). The job's firmware is flashed through the first ST-Link; every device is passed to the test runner as `THUB_DUT_UART_<n>`/`THUB_DUT_USB_<n>`/`THUB_DUT_STLINK_<n>`.
 
 ### SW executor
 

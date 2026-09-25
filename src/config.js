@@ -30,9 +30,9 @@ const USER_CONFIG_PATH = path.join(os.homedir(), '.config', 'thub', 'client.json
   // it with THUB_CLIENT_CONFIG or ~/.config/thub/client.json (§13).
   PACKAGE_DEFAULT_CONFIG_PATH = path.join(__dirname, '..', 'config.json'),
 
-  // A host runs one Client process per DUT slot (§3.3), up to MAX_SLOTS of
-  // them (dut0..dut7) — matching up to 8 UART adapters, 8 ST-Link probes, 8
-  // USB-controlled DUTs and 8 relay channels on one bench (§8.2, §8.6).
+  // Upper bound on each HW device list (hw.uarts/usbs/stlinks/relays) and on
+  // Client instances per host — matching the dut1..dut8 symlinks in
+  // udev/99-thub.rules and a relay board's 8 channels (§8.2, §8.6).
   MAX_SLOTS = 8;
 
 // Matches README.md §13 (~/.config/thub/client.json).
@@ -142,16 +142,74 @@ function assertSlotIndex(field, index){
   }
 }
 
-// §8.2/§8.6: `hw.uart.index` (0-7) is a convenience for the udev naming
-// convention (/dev/thub/dut<index>-uart) — an explicit hw.uart.path always
-// wins. ST-Link has no such shortcut: st-flash needs the probe's real
-// serial number, which udev can only alias, not assign.
-function resolveHwConfig(hw){
-  if (hw.uart?.index !== undefined && !hw.uart.path){
-    assertSlotIndex('hw.uart.index', hw.uart.index);
-    return { ...hw, uart: { ...hw.uart, path: `/dev/thub/dut${hw.uart.index}-uart` } };
+// udev/99-thub.rules names devices 1-based (dut1..dut8), unlike relay
+// channels, which are the relay board's own 0-7 numbering.
+function assertDeviceIndex(field, index){
+  if (!Number.isInteger(index) || index < 1 || index > MAX_SLOTS){
+    throw new Error(`${field} must be an integer 1-${MAX_SLOTS}, got ${index}`);
   }
-  return hw;
+}
+
+// Symlink format from udev/99-thub.rules: /dev/dut<N>-uart|usb|stlink.
+function devicePath(index, kind){
+  return `/dev/dut${index}-${kind}`;
+}
+
+function assertListSize(field, list){
+  if (!Array.isArray(list)){
+    throw new Error(`${field} must be an array`);
+  }
+  if (list.length > MAX_SLOTS){
+    throw new Error(`${field} supports at most ${MAX_SLOTS} entries, got ${list.length}`);
+  }
+}
+
+// Each entry is a udev index (number), an explicit path (string), or an
+// object with `index` or `path` (an explicit path always wins). ST-Link
+// entries may instead give the probe's `serial` directly, skipping the
+// udev lookup hw.js otherwise does to find it from the path.
+function resolveDeviceList(field, list, kind){
+  assertListSize(field, list);
+  return list.map((entry, i) => {
+    const item = typeof entry === 'number' ? { index: entry } : typeof entry === 'string' ? { path: entry } : entry;
+    if (!item || typeof item !== 'object'){
+      throw new Error(`${field}[${i}] must be an index, a path or an object`);
+    }
+    if (item.path || (kind === 'stlink' && item.serial)){
+      return item;
+    }
+    assertDeviceIndex(`${field}[${i}].index`, item.index);
+    return { ...item, path: devicePath(item.index, kind) };
+  });
+}
+
+function resolveRelayList(field, list, defaultBaseUrl){
+  assertListSize(field, list);
+  return list.map((entry, i) => {
+    const item = typeof entry === 'number' ? { channel: entry } : entry;
+    assertSlotIndex(`${field}[${i}].channel`, item?.channel);
+    return { ...item, baseUrl: item.baseUrl || defaultBaseUrl };
+  });
+}
+
+// §8.2/§8.6: up to MAX_SLOTS each of UART adapters, DUT USB devices,
+// ST-Link probes and relay channels per Client. The single-device fields
+// (`uart`, `stlinkSerial`, `power.relayIndex`) are still accepted and fold
+// into the matching list when that list isn't set.
+function resolveHwConfig(hw){
+  const { uart, stlinkSerial, ...rest } = hw,
+    power = hw.power || {},
+    uarts = hw.uarts || (uart ? [uart] : []),
+    stlinks = hw.stlinks || (stlinkSerial ? [{ serial: stlinkSerial }] : []),
+    relays = hw.relays || (power.relayIndex !== undefined ? [{ channel: power.relayIndex }] : []);
+
+  return {
+    ...rest,
+    uarts: resolveDeviceList('hw.uarts', uarts, 'uart'),
+    usbs: resolveDeviceList('hw.usbs', hw.usbs || [], 'usb'),
+    stlinks: resolveDeviceList('hw.stlinks', stlinks, 'stlink'),
+    relays: resolveRelayList('hw.relays', relays, power.baseUrl)
+  };
 }
 
 // §13: the Client's read-only Artifactory token lives in its own file
@@ -198,5 +256,7 @@ module.exports = {
   writeCredentials,
   readOrCreateClientId,
   assertSlotIndex,
+  assertDeviceIndex,
+  devicePath,
   MAX_SLOTS
 };

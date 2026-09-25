@@ -3,10 +3,10 @@
 # replace each <SERIAL_...> placeholder with that slot's actual UART
 # adapter / ST-Link probe serial number (`udevadm info -a` on the device).
 #
-# hw.uart.index in a Client's config resolves to the matching dut<N>-uart
-# symlink below; hw.stlinkSerial still needs the real ST-Link serial (no
-# index shortcut exists for it — st-flash selects probes by serial, not
-# by udev path).
+# A Client's hw.uarts / hw.usbs / hw.stlinks entries (up to 8 each) use
+# these symlinks: index N resolves to /dev/dut<N>-uart|usb|stlink. For an
+# ST-Link, the Client reads the probe's serial from its symlink via udevadm,
+# since st-flash selects probes by serial, not by device path.
 
 # ST Links maps
 SUBSYSTEM=="usb", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="3748", ATTR{devpath}=="3.3.4.3.1", SYMLINK+="dut1-stlink"
