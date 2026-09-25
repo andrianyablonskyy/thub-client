@@ -12,9 +12,27 @@
     "allowedArtifactPrefixes": ["https://artifactory.example.com/fw-local/"]
   },
   "hw": {
-    "stlinks": [{ "path": "/dev/dut1-stlink" }],
-    "uarts": [{ "path": "/dev/dut1-uart", "baudRate": 115200 }],
-    "usbs": [{ "path": "/dev/dut1-usb" }],
+    "stlinks": [
+      { "path": "/dev/dut1-stlink" }, 
+      { "path": "/dev/dut2-stlink" }, 
+      { "path": "/dev/dut3-stlink" }, 
+      { "path": "/dev/dut4-stlink" }, 
+      { "path": "/dev/dut5-stlink" }
+    ],
+    "uarts": [
+      { "path": "/dev/dut1-uart", "baudRate": 115200 },
+      { "path": "/dev/dut2-uart", "baudRate": 115200 },
+      { "path": "/dev/dut3-uart", "baudRate": 115200 },
+      { "path": "/dev/dut4-uart", "baudRate": 115200 },
+      { "path": "/dev/dut5-uart", "baudRate": 115200 }
+    ],
+    "usbs": [
+      { "path": "/dev/dut1-usb" },
+      { "path": "/dev/dut2-usb" },
+      { "path": "/dev/dut3-usb" },
+      { "path": "/dev/dut4-usb" },
+      { "path": "/dev/dut5-usb" }
+    ],
     "relays": [{ "channel": 0, "baseUrl": "http://localhost:3000" }],
     "power": { "method": "relay" }
   },
