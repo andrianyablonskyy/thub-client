@@ -16,6 +16,7 @@ That one command is the complete installation. Run as root on Linux, for the use
 - create `~/.config/thub/client.json` (0600) if it doesn't exist yet, with blank `coordinatorUrl`/`joinKey`, `type: hw` and `varDir` pointing at the state directory — a re-install/upgrade never overwrites it;
 - install `udev/99-thub.rules` to `/etc/udev/rules.d` (stable `/dev/dut<N>-uart|usb|stlink` paths for HW Clients) and reload udev;
 - install `/etc/systemd/system/thub-client@.service`, rendered for that user: `User=`/`Group=`, `SupplementaryGroups=` whichever of `dialout`, `plugdev` and `docker` exist on the host, `THUB_CLIENT_CONFIG=~/.config/thub/%i.json`, the state directory as `WorkingDirectory=`/`ReadWritePaths=`, and `ExecStart` pointing at this install's real `node`/`daemon.js` (works with `apt`-installed Node, `nvm` or any npm prefix) with `--name %i`, so each instance registers under its own instance name;
+- install and enable `thub-client-update.path`/`.service`, the root helper that applies self-updates requested from the Coordinator (see "Updates" below);
 - enable and (re)start `thub-client@client` once `client.json` is filled in, and restart every other running `thub-client@*` instance, so an upgrade takes effect immediately.
 
 On a fresh install the service isn't started yet — the daemon would exit at once with blank required fields. Fill in the config, then start it (below).
@@ -141,6 +142,15 @@ With several instances on one host, target the right one with `--config` before 
 thub-client --config ~/.config/thub/dut1.json status
 thub-client --config ~/.config/thub/dut1.json lock --reason "debugging I2C"
 ```
+
+## Updates
+
+```bash
+thub-client check-update                 # installed vs latest published version
+thub-client self-update [--to <x.y.z>]   # sudo npm i -g; restarts every running instance
+```
+
+Normally an admin updates Clients from the Coordinator dashboard (per resource or **Update all clients**). The Coordinator then sends a `self-update` command in the heartbeat response. The daemon runs sandboxed as an unprivileged user, so it only writes `<varDir>/update-request.json` (once per version, and only while it has no job running and no local lock). The root `thub-client-update.path` unit, installed and enabled by `sudo npm i -g`, starts `thub-client-update.service`. That service waits until no instance on the host has a job running or a local lock (up to 24 h), since the install restarts all of them, then runs `npm i -g @andrian.yablonskyy/thub-client@<version>` for the Client's user. It only ever installs `thub-client`, at a strictly validated version. Logs: `journalctl -u thub-client-update`.
 
 ## Job execution lifecycle
 

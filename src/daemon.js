@@ -20,7 +20,13 @@ const fs = require('node:fs'),
   { loadConfig, readCredentials, writeCredentials } = require('./config'),
   { ClientApiClient } = require('./api-client'),
   { createControlSocketServer } = require('./control-socket'),
-  { JobRunner } = require('./runner');
+  { JobRunner } = require('./runner'),
+  { PACKAGES, isNewer } = require('@andrian.yablonskyy/thub-common'),
+  { version } = require('../package.json');
+
+// Installed by scripts/install-systemd-unit.js; runs the actual `npm i -g`
+// as root when this daemon writes its update request (README §10.2).
+const UPDATE_PATH_UNIT = '/etc/systemd/system/thub-client-update.path';
 
 // Every address on this host's network interfaces except loopback, for
 // the dashboard's resource card. The external address isn't known here —
@@ -205,6 +211,39 @@ class Daemon{
       else if (command.command === 'cancel-job'){
         // Stale job reported after a reconnect (§15) — nothing local to cancel.
       }
+      else if (command.command === 'self-update'){
+        this._requestSelfUpdate(command.version);
+      }
+    }
+  }
+
+  // The Coordinator repeats `self-update` on every heartbeat until this
+  // Client reports the new version, so act once per version per process:
+  // write the request the root thub-client-update.path unit picks up. Its
+  // postinstall restarts this instance onto the new version, so wait for
+  // an idle, unlocked moment (a later heartbeat) rather than lose a job or
+  // a manual lock; the helper also waits for every other instance.
+  _requestSelfUpdate(target){
+    if (target === this.requestedUpdate || !isNewer(target, version) || this.activeJobId || this.localLock.locked){
+      return;
+    }
+    this.requestedUpdate = target;
+    if (!fs.existsSync(UPDATE_PATH_UNIT)){
+      console.warn(
+        `self-update to v${target} requested, but ${UPDATE_PATH_UNIT} isn't installed — ` +
+          `update by hand: sudo npm i -g ${PACKAGES.client}@${target}`
+      );
+      return;
+    }
+    try {
+      fs.writeFileSync(
+        this.config.updateRequestFile,
+        JSON.stringify({ version: target, instance: this.config.name, requestedAt: new Date().toISOString() }) + '\n'
+      );
+      console.log(`self-update v${version} -> v${target} requested (${this.config.updateRequestFile})`);
+    }
+    catch (err){
+      console.error(`self-update request failed: ${err.message}`);
     }
   }
 

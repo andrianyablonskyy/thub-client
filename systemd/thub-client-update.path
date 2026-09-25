@@ -1,0 +1,13 @@
+[Unit]
+Description=TestHub Client self-update request watcher
+
+# PathModified= is rewritten by scripts/install-systemd-unit.js to the
+# update-request.json in the state directory (varDir) the thub-client@
+# instances write to. A Client writes it when the Coordinator asks it to
+# self-update; this starts thub-client-update.service (as root) to install it.
+[Path]
+PathModified=/home/thub/var/lib/thub/client/update-request.json
+Unit=thub-client-update.service
+
+[Install]
+WantedBy=multi-user.target

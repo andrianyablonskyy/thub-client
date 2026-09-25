@@ -92,6 +92,9 @@ function loadConfig(configPath = process.env.THUB_CLIENT_CONFIG, overrides = {})
       // Filename is literally .client-id; lives under a per-instance dir (not
       // varDir directly) so 8 Client instances on one host don't share one.
       clientIdFile: raw.clientIdFile || path.join(varDir, instance, '.client-id'),
+      // Written when the Coordinator asks for a self-update; host-wide, and
+      // watched by the root thub-client-update.path unit (README §10.2).
+      updateRequestFile: raw.updateRequestFile || path.join(varDir, 'update-request.json'),
       artifactory: resolveArtifactoryConfig(raw.artifactory || {}),
       hw,
       sw: raw.sw || {},
