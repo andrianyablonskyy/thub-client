@@ -1,6 +1,6 @@
 {
   "name": "@andrian.yablonskyy/thub-client",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "description": "thub-client — runs on lab machines, executes test jobs against a DUT (HW) or emulator (SW)",
   "main": "src/daemon.js",
   "bin": {
