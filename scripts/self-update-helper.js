@@ -21,7 +21,11 @@ const fs = require('node:fs'),
   { version: installedVersion } = require('../package.json');
 
 const POLL_MS = 30_000,
-  MAX_WAIT_MS = 24 * 3600 * 1000;
+  MAX_WAIT_MS = 24 * 3600 * 1000,
+  // Longer than a Client's job long-poll (longPollWaitSec, default 30 s):
+  // a poll already in flight when the hold goes up may still hand its
+  // instance a job, which must then show up as busy before we look.
+  HOLD_GRACE_MS = 45_000;
 
 // npm's postinstall restarts *every* running thub-client@ instance on the
 // host, not just the one that asked — so wait until none of them has a job
@@ -102,18 +106,37 @@ async function main(){
     return 0;
   }
 
-  if (!await waitUntilIdle(runDir)){
-    console.error('thub-client-update: instances stayed busy for 24h — giving up; restart a Client to ask again');
-    return 1;
+  // Hold the host: from here no instance takes a new job (daemon.js
+  // _syncUpdateHold), so "idle" below stays true until the install
+  // restarts them. Released however this ends.
+  const holdFile = path.join(path.dirname(requestFile), 'update-hold.json');
+  fs.writeFileSync(holdFile, JSON.stringify({ version: target, since: new Date().toISOString() }) + '\n');
+  // `systemctl stop thub-client-update` mid-wait mustn't leave the hold up.
+  for (const signal of ['SIGTERM', 'SIGINT']){
+    process.on(signal, () => {
+      fs.rmSync(holdFile, { force: true });
+      process.exit(1);
+    });
   }
-  console.log(`thub-client-update: v${installedVersion} -> v${target} (requested by ${request.instance || 'a Client'})`);
-  // SUDO_USER makes the postinstall scripts target the Client's user, as
-  // a `sudo npm i -g` by that user would (install-target.js).
-  const status = npmInstallGlobal(PACKAGES.client, target, { env: { ...process.env, SUDO_USER: user } });
-  if (status !== 0){
-    console.error(`thub-client-update: npm i -g failed (exit ${status})`);
+  try {
+    console.log(`thub-client-update: holding new jobs for v${target}; waiting for running jobs and uploads to finish`);
+    await new Promise((resolve) => setTimeout(resolve, HOLD_GRACE_MS));
+    if (!await waitUntilIdle(runDir)){
+      console.error('thub-client-update: instances stayed busy for 24h — giving up; restart a Client to ask again');
+      return 1;
+    }
+    console.log(`thub-client-update: v${installedVersion} -> v${target} (requested by ${request.instance || 'a Client'})`);
+    // SUDO_USER makes the postinstall scripts target the Client's user, as
+    // a `sudo npm i -g` by that user would (install-target.js).
+    const status = npmInstallGlobal(PACKAGES.client, target, { env: { ...process.env, SUDO_USER: user } });
+    if (status !== 0){
+      console.error(`thub-client-update: npm i -g failed (exit ${status})`);
+    }
+    return status;
   }
-  return status;
+  finally {
+    fs.rmSync(holdFile, { force: true });
+  }
 }
 
 main()

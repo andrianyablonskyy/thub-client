@@ -154,7 +154,13 @@ thub-client check-update                 # installed vs latest published version
 thub-client self-update [--to <x.y.z>]   # sudo npm i -g; restarts every running instance
 ```
 
-Normally an admin updates Clients from the Coordinator dashboard (per resource or **Update all clients**). The Coordinator then sends a `self-update` command in the heartbeat response. The daemon runs sandboxed as an unprivileged user, so it only writes `<varDir>/update-request.json` (once per version, and only while it has no job running and no local lock). The root `thub-client-update.path` unit, installed and enabled by `sudo npm i -g`, starts `thub-client-update.service`. That service waits until no instance on the host has a job running or a local lock (up to 24 h), since the install restarts all of them, then runs `npm i -g @andrian.yablonskyy/thub-client@<version>` for the Client's user. It only ever installs `thub-client`, at a strictly validated version. Logs: `journalctl -u thub-client-update`.
+A Client updates only when an admin requested it (Coordinator dashboard: per resource or **Update all clients**) **and** it isn't running a job. A job counts as running until it's completely finished, including the artifact upload, the result and the final log flush. The Coordinator sends a `self-update` command in the heartbeat response. The daemon runs sandboxed as an unprivileged user, so it only writes `<varDir>/update-request.json`, once per version and only while idle with no local lock. The root `thub-client-update.path` unit, installed and enabled by `sudo npm i -g`, starts `thub-client-update.service`, which:
+1. creates `<varDir>/update-hold.json`. While it exists no instance on the host takes a new job, and each shows on the Coordinator as busy (`local — self-update in progress`), so jobs submitted meanwhile stay queued;
+2. waits 45 s so a job handed out just before the hold is visible, then waits (up to 24 h) until no instance has a job running or a manual lock;
+3. runs `npm i -g @andrian.yablonskyy/thub-client@<version>` for the Client's user. That restarts every instance on the new version;
+4. removes the hold, also on failure or `systemctl stop`. A hold older than 2 h is ignored.
+
+It only ever installs `thub-client`, at a strictly validated version. Logs: `journalctl -u thub-client-update`.
 
 ## Job execution lifecycle
 
