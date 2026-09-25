@@ -244,23 +244,26 @@ function sleep(ms){
 // Accepts --config/-c <path> (or --config=<path>) so a specific instance can
 // be started without exporting THUB_CLIENT_CONFIG first — the same escape
 // hatch `thub-client --config <path> ...` has, for running several Client
-// instances on one host (§8.6). No commander dependency here since this is
-// the only flag the daemon entry point takes.
-function configPathFromArgv(argv){
+// instances on one host (§8.6) — and --name/-n <name> (or --name=<name>),
+// which overrides the config file's `name`; the systemd unit passes its
+// instance name here, so thub-client@dut1 registers as "dut1". No commander
+// dependency here since these are the only flags the daemon entry point takes.
+function optionFromArgv(argv, long, short){
   for (let i = 0; i < argv.length; i++){
     const arg = argv[i];
-    if (arg === '--config' || arg === '-c'){
+    if (arg === long || arg === short){
       return argv[i + 1];
     }
-    if (arg.startsWith('--config=')){
-      return arg.slice('--config='.length);
+    if (arg.startsWith(`${long}=`)){
+      return arg.slice(long.length + 1);
     }
   }
   return undefined;
 }
 
 if (require.main === module){
-  const config = loadConfig(configPathFromArgv(process.argv.slice(2))),
+  const argv = process.argv.slice(2),
+    config = loadConfig(optionFromArgv(argv, '--config', '-c'), { name: optionFromArgv(argv, '--name', '-n') }),
     daemon = new Daemon(config);
   daemon
     .start()
