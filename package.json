@@ -9,6 +9,8 @@
   },
   "scripts": {
     "start": "node src/daemon.js",
+    "register": "node src/cli.js register",
+    "deregister": "node src/cli.js deregister",
     "postinstall": "node scripts/install-udev-rules.js && node scripts/install-default-config.js && node scripts/install-systemd-unit.js",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix"
