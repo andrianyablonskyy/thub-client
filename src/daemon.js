@@ -27,7 +27,10 @@ const fs = require('node:fs'),
 
 // Installed by scripts/install-systemd-unit.js; runs the actual `npm i -g`
 // as root when this daemon writes its update request (README §10.2).
-const UPDATE_PATH_UNIT = '/etc/systemd/system/thub-client-update.path';
+const UPDATE_PATH_UNIT = '/etc/systemd/system/thub-client-update.path',
+  // A hold older than this is left over from a crashed helper — ignore it.
+  UPDATE_HOLD_MAX_AGE_MS = 2 * 3600 * 1000,
+  UPDATE_HOLD_REASON = 'self-update in progress';
 
 // Every address on this host's network interfaces except loopback, for
 // the dashboard's resource card. The external address isn't known here —
@@ -131,7 +134,8 @@ class Daemon{
       status: async () => ({
         resourceId: this.resourceId,
         activeJobId: this.activeJobId,
-        localLock: this.localLock
+        localLock: this.localLock,
+        updateHold: this.updateHold
       })
     });
   }
@@ -141,10 +145,30 @@ class Daemon{
       return;
     }
     await this.client.post(`/resources/${this.resourceId}/status`, {
-      busy: this.localLock.locked,
+      busy: this.localLock.locked || this.updateHold,
       source: 'local',
-      reason: this.localLock.reason
+      reason: this.localLock.locked ? this.localLock.reason : this.updateHold ? UPDATE_HOLD_REASON : null
     });
+  }
+
+  // While the root update helper holds the host (README §10.2), take no
+  // new jobs and show as busy on the Coordinator so none is scheduled
+  // here — a job already running finishes (uploads included) first; the
+  // helper waits for that before installing and restarting every instance.
+  async _syncUpdateHold(){
+    let held = false;
+    try {
+      held = Date.now() - fs.statSync(this.config.updateHoldFile).mtimeMs < UPDATE_HOLD_MAX_AGE_MS;
+    }
+    catch {
+      // no hold
+    }
+    if (held === Boolean(this.updateHold)){
+      return;
+    }
+    this.updateHold = held;
+    console.log(held ? 'self-update in progress: not taking new jobs' : 'self-update hold released');
+    await this._reportStatus().catch((err) => console.error('status report failed:', err.message));
   }
 
   // Heartbeats run on their own timer, independent of whatever the work
@@ -179,7 +203,8 @@ class Daemon{
   // so a slow/long job never starves heartbeats.
   async _workLoop(){
     while (!this.stopped){
-      if (this.localLock.locked){
+      await this._syncUpdateHold();
+      if (this.localLock.locked || this.updateHold){
         await sleep(1000);
         continue;
       }
@@ -198,9 +223,9 @@ class Daemon{
 
   async _heartbeat(){
     const { commands } = await this.client.post(`/resources/${this.resourceId}/heartbeat`, {
-      state: this.activeJobId ? 'busy' : this.localLock.locked ? 'busy' : 'idle',
+      state: this.activeJobId || this.localLock.locked || this.updateHold ? 'busy' : 'idle',
       activeJobId: this.activeJobId,
-      localLock: this.localLock.locked,
+      localLock: this.localLock.locked || this.updateHold,
       // Re-sent every time so a DHCP renewal or a cable moved to another
       // port shows up without restarting the Client.
       addresses: localAddresses()

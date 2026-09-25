@@ -95,6 +95,9 @@ function loadConfig(configPath = process.env.THUB_CLIENT_CONFIG, overrides = {})
       // Written when the Coordinator asks for a self-update; host-wide, and
       // watched by the root thub-client-update.path unit (README §10.2).
       updateRequestFile: raw.updateRequestFile || path.join(varDir, 'update-request.json'),
+      // Created by the root update helper next to the request while an
+      // update is being applied: no instance takes new jobs meanwhile.
+      updateHoldFile: raw.updateHoldFile || path.join(varDir, 'update-hold.json'),
       artifactory: resolveArtifactoryConfig(raw.artifactory || {}),
       hw,
       sw: resolveSwConfig(raw.sw || {}),
