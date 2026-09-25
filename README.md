@@ -48,7 +48,7 @@ thub-client register --name emu1 --type sw
 thub-client deregister --name dut1           # stop + disable thub-client@dut1, remove dut1.json
 ```
 
-`--name` defaults to `client` and `--type` to `hw`. Registering an existing instance keeps its config and only updates `type`. Deregistering keeps `client.json` (the template for new instances) and the instance's state under `varDir`, so re-registering the same name comes back as the same resource. Doing it by hand is equivalent: copy `client.json` to `dut1.json`, then `sudo systemctl enable --now thub-client@dut1`.
+`--name` defaults to `client` and `--type` to `hw`. From a checkout of this repo the same commands are `npm run register -- --name dut1 --type hw` / `npm run deregister -- --name dut1` (or `npm run client:register -- ...` / `npm run client:deregister -- ...` from the monorepo root). Registering an existing instance keeps its config and only updates `type`. Deregistering keeps `client.json` (the template for new instances) and the instance's state under `varDir`, so re-registering the same name comes back as the same resource. Doing it by hand is equivalent: copy `client.json` to `dut1.json`, then `sudo systemctl enable --now thub-client@dut1`.
 
 Keep `varDir` at the one in `client.json` — the service can only write there, and every per-instance path under it is already namespaced by the config's filename. If you change `client.json`'s `varDir`/`runDir`, re-run `sudo npm i -g @andrian.yablonskyy/thub-client` so the unit's `ReadWritePaths=` follows.
 
@@ -56,7 +56,7 @@ Every install step is best-effort and never fails the `npm install` itself, and 
 
 ## Running it directly (no systemd — after a global install, development, or a one-off manual run)
 
-`npm install -g` also gives you `thub-client-daemon`, a direct command for the daemon itself (`thub-client` alone is only the control CLI — lock/unlock/status/stop/restart):
+`npm install -g` also gives you `thub-client-daemon`, a direct command for the daemon itself (`thub-client` alone is only the control CLI — lock/unlock/status/stop/restart/register/deregister):
 
 ```bash
 THUB_CLIENT_CONFIG=/etc/thub/dut0.json thub-client-daemon

@@ -16,10 +16,22 @@
 'use strict';
 
 const fs = require('node:fs'),
+  os = require('node:os'),
   { loadConfig, readCredentials, writeCredentials } = require('./config'),
   { ClientApiClient } = require('./api-client'),
   { createControlSocketServer } = require('./control-socket'),
   { JobRunner } = require('./runner');
+
+// Every address on this host's network interfaces except loopback, for
+// the dashboard's resource card. The external address isn't known here —
+// the Coordinator records the one each request arrives from.
+function localAddresses(){
+  return Object.entries(os.networkInterfaces()).flatMap(([iface, addrs]) =>
+    (addrs || [])
+      .filter((a) => !a.internal)
+      .map((a) => ({ iface, address: a.address, family: typeof a.family === 'number' ? `IPv${a.family}` : a.family }))
+  );
+}
 
 // §3.3 / §8: the Client daemon core — registration, heartbeat, long-poll,
 // log shipping and upload — dispatching to whichever executor the job
@@ -79,7 +91,7 @@ class Daemon{
           type: this.config.type,
           labels: this.config.labels,
           groups: this.config.groups,
-          hostInfo: { hostname: require('node:os').hostname(), platform: process.platform }
+          hostInfo: { hostname: os.hostname(), platform: process.platform, addresses: localAddresses() }
         });
       writeCredentials(this.config.tokenFile, { resourceId, resourceToken });
       this.resourceId = resourceId;
@@ -180,7 +192,10 @@ class Daemon{
     const { commands } = await this.client.post(`/resources/${this.resourceId}/heartbeat`, {
       state: this.activeJobId ? 'busy' : this.localLock.locked ? 'busy' : 'idle',
       activeJobId: this.activeJobId,
-      localLock: this.localLock.locked
+      localLock: this.localLock.locked,
+      // Re-sent every time so a DHCP renewal or a cable moved to another
+      // port shows up without restarting the Client.
+      addresses: localAddresses()
     });
 
     for (const command of commands || []){

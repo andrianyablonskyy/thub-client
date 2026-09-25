@@ -20,6 +20,11 @@ const fs = require('node:fs'),
 // Adds multipart artifact upload (§6.2 POST /jobs/:id/artifacts) on top of
 // the shared JSON API client.
 class ClientApiClient extends ApiClient{
+  // Reports this Client's version to the Coordinator (resource card, §10).
+  constructor(opts){
+    super({ userAgent: `thub-client/${require('../package.json').version}`, ...opts });
+  }
+
   async postArtifacts(jobId, filePaths){
     const form = new FormData();
     for (const filePath of filePaths){
