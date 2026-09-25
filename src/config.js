@@ -97,7 +97,7 @@ function loadConfig(configPath = process.env.THUB_CLIENT_CONFIG, overrides = {})
       updateRequestFile: raw.updateRequestFile || path.join(varDir, 'update-request.json'),
       artifactory: resolveArtifactoryConfig(raw.artifactory || {}),
       hw,
-      sw: raw.sw || {},
+      sw: resolveSwConfig(raw.sw || {}),
       heartbeatIntervalSec: raw.heartbeatIntervalSec || 10,
       longPollWaitSec: raw.longPollWaitSec || 30,
       configPath: candidate
@@ -217,6 +217,30 @@ function resolveHwConfig(hw){
     stlinks: resolveDeviceList('hw.stlinks', stlinks, 'stlink'),
     relays: resolveRelayList('hw.relays', relays, power.baseUrl)
   };
+}
+
+// §8.3: where the SW executor gets `sw.image` from, in order — the lab's
+// own registry (`registry`, host[:port]; an http(s):// prefix is dropped,
+// Docker picks the scheme), then Docker Hub only if `allowDockerHub` is
+// true. Registry credentials follow the Artifactory token's pattern: the
+// password comes from a file, not the config itself.
+function resolveSwConfig(sw){
+  const registry = typeof sw.registry === 'string' ? sw.registry.trim().replace(/^https?:\/\//i, '').replace(/\/+$/, '') : '',
+    auth = sw.registryAuth;
+  let registryAuth = null;
+  if (registry && auth?.username){
+    let password = auth.password || '';
+    if (!password && auth.passwordFile){
+      try {
+        password = fs.readFileSync(auth.passwordFile, 'utf8').trim();
+      }
+      catch (err){
+        throw new Error(`sw.registryAuth.passwordFile: ${err.message}`);
+      }
+    }
+    registryAuth = { username: auth.username, password, serveraddress: registry };
+  }
+  return { ...sw, registry: registry || null, allowDockerHub: sw.allowDockerHub === true, registryAuth };
 }
 
 // §13: the Client's read-only Artifactory token lives in its own file

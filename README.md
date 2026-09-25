@@ -105,7 +105,9 @@ If two instances instead share the exact same config file (told apart only by `n
 | `artifactory.tokenFile` | No | — | Path to the Client's own read-only Artifactory token. |
 | `artifactory.allowedArtifactPrefixes` | No | `[]` | Job `firmware.url`/`tests.url` must start with one of these. |
 
-**SW-only** (`type: sw`): `sw.image` (required), `sw.cpus` (default 2), `sw.memory` (default `2g`).
+**SW-only** (`type: sw`): `sw.image` (required — a plain repository name like `dut-emulator:2026.08`), `sw.registry` (local registry `host[:port]`), `sw.registryAuth` (`{ username, passwordFile | password }`), `sw.allowDockerHub` (default `false`), `sw.cpus` (default 2), `sw.memory` (default `2g`).
+
+The image is looked up in order: `sw.registry` first, then Docker Hub only if `sw.allowDockerHub` is `true`, and if neither has it the job fails with the reason for each source. An image already cached on the host counts for its source. An image that names its own registry host (`other.example.com/emu:1`) is pulled from that host only. A plain-HTTP registry must also be in the Docker daemon's `insecure-registries`.
 
 **HW-only** (`type: hw`): up to 8 each of `hw.stlinks`, `hw.uarts`, `hw.usbs` (entries: udev index 1–8 → `/dev/dut<N>-stlink|uart|usb`, a path, or `{ index | path, ... }`; ST-Link entries may give `serial`, UARTs `baudRate`) and `hw.relays` (`{ channel: 0-7, baseUrl }`), plus `hw.power.method` (`uhubctl` or `relay`) and `hw.power.hub`/`.port` or `.baseUrl`. The legacy `hw.stlinkSerial`, `hw.uart` and `hw.power.relayIndex` still work.
 
@@ -118,7 +120,7 @@ Example SW config:
   "type": "sw",
   "joinKey": "<same value as the Coordinator's clientJoinKey>",
   "artifactory": { "tokenFile": "/etc/thub/artifactory.token" },
-  "sw": { "image": "registry.example.com/dut-emulator:2026.08", "cpus": 2, "memory": "2g" }
+  "sw": { "image": "dut-emulator:2026.08", "registry": "registry.lab.local:5000", "allowDockerHub": false, "cpus": 2, "memory": "2g" }
 }
 ```
 
@@ -170,7 +172,7 @@ ST-Link via `st-flash`/`openocd`, UART via the `serialport` npm package, optiona
 
 ### SW executor
 
-Runs the emulator (e.g. Renode, QEMU) in Docker via `dockerode`, one container per job, isolated network, always removed in teardown. The emulator's virtual UART is exposed as a TCP port the test runner connects to via `THUB_DUT_HOST`.
+Pulls the emulator image from the local registry (`sw.registry`), then Docker Hub if `sw.allowDockerHub`, else fails (see "Configuration reference"). Runs the emulator (e.g. Renode, QEMU) in Docker via `dockerode`, one container per job, isolated network, always removed in teardown. The emulator's virtual UART is exposed as a TCP port the test runner connects to via `THUB_DUT_HOST`.
 
 ## Development
 
