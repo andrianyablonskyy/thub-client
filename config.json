@@ -4,7 +4,7 @@
   "type": "hw",
   "labels": [],
   "groups": [],
-  "joinKey": "change-me-to-a-long-random-string",
+  "joinKey": "silver-mountain-whispers-quietly-now",
   "heartbeatIntervalSec": 10,
   "longPollWaitSec": 30,
   "artifactory": {

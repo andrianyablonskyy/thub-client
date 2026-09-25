@@ -10,43 +10,44 @@ Clients only make **outbound** connections to the [Coordinator](https://github.c
 sudo npm i -g @andrian.yablonskyy/thub-client
 ```
 
-Run as root on Linux, this also installs `udev/99-thub.rules` (HW only) and `systemd/thub-client@.service` via the package's postinstall script — no separate manual `cp` step for either. See "Ubuntu 26.04 host setup" below for the full setup (service user, Docker for SW, per-DUT config, enabling the systemd instance).
+That one command is the complete installation. Run as root on Linux, for the user who ran `sudo` (`SUDO_USER` — not root; that user owns every file and runs the service), the package's postinstall scripts:
+
+- create `~/.config/thub` and `~/var/lib/thub/client` (with `work/`) — the state directory for tokens, client ids, job workspaces, control sockets and pidfiles;
+- create `~/.config/thub/client.json` (0600) if it doesn't exist yet, with blank `coordinatorUrl`/`name`/`joinKey`, `type: hw` and `varDir` pointing at the state directory — a re-install/upgrade never overwrites it;
+- install `udev/99-thub.rules` to `/etc/udev/rules.d` (stable `/dev/dut<N>-uart|usb|stlink` paths for HW Clients) and reload udev;
+- install `/etc/systemd/system/thub-client@.service`, rendered for that user: `User=`/`Group=`, `SupplementaryGroups=` whichever of `dialout`, `plugdev` and `docker` exist on the host, `THUB_CLIENT_CONFIG=~/.config/thub/%i.json`, the state directory as `WorkingDirectory=`/`ReadWritePaths=`, and `ExecStart` pointing at this install's real `node`/`daemon.js` (works with `apt`-installed Node, `nvm` or any npm prefix);
+- enable and (re)start `thub-client@client` once `client.json` is filled in, and restart every other running `thub-client@*` instance, so an upgrade takes effect immediately.
+
+On a fresh install the service isn't started yet — the daemon would exit at once with blank required fields. Fill in the config, then start it (below).
 
 ## Ubuntu 26.04 host setup
 
 ```bash
 sudo apt install -y nodejs npm stlink-tools openocd uhubctl
-sudo useradd --system --home /var/lib/thub --groups dialout,plugdev thub
+# SW only: Docker — install it before thub-client so the service gets the
+# docker group (re-run the npm i -g below if you add it later)
+sudo apt install -y docker.io
 
 sudo npm i -g @andrian.yablonskyy/thub-client
 
-# SW only: Docker
-sudo apt install -y docker.io && sudo usermod -aG docker thub
+# coordinatorUrl, name, type and joinKey (the Coordinator's clientJoinKey);
+# see "Configuration reference" below for every field
+nano ~/.config/thub/client.json
 
-# npm install doesn't create this — write your own, one per DUT slot,
-# named to match the systemd instance you enable below (dut0 -> dut0.json).
-# %h in the unit resolves to thub's home (/var/lib/thub, set via
-# useradd --home above), so the file lives under its .config, same as
-# every other package's ~/.config/thub/<name>.json default (§13).
-# See "Configuration reference" below for every field and full SW/HW
-# examples.
-sudo mkdir -p /var/lib/thub/.config/thub
-sudo chown thub:thub /var/lib/thub/.config /var/lib/thub/.config/thub
-sudo tee /var/lib/thub/.config/thub/dut0.json > /dev/null <<'EOF'
-{
-  "coordinatorUrl": "https://thub.example.com",
-  "name": "lab-hw-01",
-  "type": "hw",
-  "joinKey": "<same value as the Coordinator's clientJoinKey>"
-}
-EOF
-
-sudo systemctl enable --now thub-client@dut0
+sudo systemctl enable --now thub-client@client
+journalctl -u thub-client@client -f
 ```
 
-The systemd unit uses `Restart=always`, `NoNewPrivileges=yes`, `ProtectSystem=strict` and `ReadWritePaths=/var/lib/thub`; the template name (`@dut0`) selects `~/.config/thub/dut0.json` for the `thub` user (`%h/.config/thub/%i.json` in the unit, i.e. `/var/lib/thub/.config/thub/dut0.json`) so one machine can host multiple DUT slots. Its `ExecStart` is rewritten at install time to this exact install's real `node`/`daemon.js` paths — not just the checked-in file's hardcoded `/usr/lib/node_modules/...` guess — so it works whether Node came from `apt`, `nvm`, or anywhere else.
+**Several DUT slots on one host.** The systemd instance name selects the config file — `thub-client@dut1` reads `~/.config/thub/dut1.json` — so add one file per slot and enable its instance:
 
-The udev rule, systemd unit and `~/.config/thub/client.json` install are all best-effort and never fail the `npm install` itself, and only ever run for an actual global install (`npm install -g`) — a plain local `npm install` (e.g. in a dev checkout, or as root inside a CI/Docker image, which is common) never touches `/etc/udev`, `/etc/systemd`, or `~/.config/thub` at all. On a non-Linux machine, or a global install without root, the udev/systemd steps just print their own manual fallback command instead of running it.
+```bash
+cp ~/.config/thub/client.json ~/.config/thub/dut1.json   # then edit name/hw for slot 1
+sudo systemctl enable --now thub-client@dut1
+```
+
+Keep `varDir` at the one in `client.json` — the service can only write there, and every per-instance path under it is already namespaced by the config's filename. If you change `client.json`'s `varDir`/`runDir`, re-run `sudo npm i -g @andrian.yablonskyy/thub-client` so the unit's `ReadWritePaths=` follows.
+
+Every install step is best-effort and never fails the `npm install` itself, and only runs for an actual global install (`npm install -g`) — a plain local `npm install` (e.g. in a dev checkout, or as root inside a CI/Docker image, which is common) never touches `/etc/udev`, `/etc/systemd`, `~/.config/thub` or `~/var/lib/thub`. A global install without root, or on a non-Linux machine, still creates the directories and `client.json` for the current user, but skips udev/systemd and prints the `sudo npm i -g` command to run instead.
 
 ## Running it directly (no systemd — after a global install, development, or a one-off manual run)
 
@@ -61,7 +62,7 @@ From a local checkout of this repo (not a global install), the same thing is `no
 
 Config resolution: `--config`/`-c` flag, or `THUB_CLIENT_CONFIG` env var, → `~/.config/thub/client.json` → the bundled `config.json` default. Plain JSON only. A specific instance still always needs its own explicit `--config`/`THUB_CLIENT_CONFIG` — the `~/.config/thub/client.json` fallback only covers the single default/no-flag case.
 
-`npm install -g` creates `~/.config/thub/client.json` for you if it doesn't already exist, with blank `coordinatorUrl`/`name`/`joinKey` (so nothing registers until you set them) — a re-install never overwrites it. For a multi-instance setup (`dutN.json` files, above) it's just a starting point for your first/default instance.
+`npm install -g` creates `~/.config/thub/client.json` for you if it doesn't already exist (see "Install" above) — a re-install never overwrites it. For a multi-instance setup (`dutN.json` files, above) it's just a starting point for your first/default instance.
 
 **Running several Clients on one host** — start one daemon process per config file, each pointed at its own `dutN.json`; every default path (`tokenFile`, `workDir`, `socketPath`, `pidFile`, `clientIdFile`) is already namespaced by the config file's own basename, so up to 8 instances (`dut0`..`dut7`, one per UART/ST-Link/relay channel) coexist with zero extra setup:
 
@@ -82,8 +83,8 @@ If two instances instead share the exact same config file (told apart only by ed
 | `labels` | No | `[]` | Fully replaces the resource's labels on every registration. |
 | `groups` | No | `[]` | Which resource group(s) this Client is a member of — fully replaces membership on every registration. |
 | `joinKey` | Yes, unless re-registering is disabled | — | Shared secret proving this Client may self-register. Also settable as `THUB_CLIENT_JOIN_KEY`. Consulted on every start/restart. |
-| `varDir` | No | `/var/lib/thub` | Base for `tokenFile`/`workDir` defaults. |
-| `runDir` | No | `/run/thub` | Base for `socketPath`/`pidFile` defaults. **Must be changed on macOS** — `/run` doesn't exist there. |
+| `varDir` | No | `<cwd>/.data` (`~/var/lib/thub/client` in the installed `client.json`) | Base for `tokenFile`/`workDir`/`clientIdFile` defaults. Under systemd it must stay within the unit's `ReadWritePaths=`. |
+| `runDir` | No | `varDir` | Base for `socketPath`/`pidFile` defaults. |
 | `tokenFile` | No | `<varDir>/<instance>.token` | Where the resource id + token are persisted (0600) after registration. |
 | `workDir` | No | `<varDir>/work/<instance>` | Per-job workspace root, cleaned up after each job. |
 | `socketPath` | No | `<runDir>/<instance>.sock` | Unix socket for `thub-client lock/unlock/status`. |
@@ -115,20 +116,20 @@ Example SW config:
 ## `thub-client` — the control CLI
 
 ```bash
-sudo thub-client lock --reason "debugging I2C"   # -> BUSY (source=local)
-sudo thub-client unlock                           # -> IDLE
+thub-client lock --reason "debugging I2C"   # -> BUSY (source=local)
+thub-client unlock                           # -> IDLE
 thub-client status
 thub-client stop      # SIGTERM; graceful, bounded shutdown
 thub-client restart   # stop, then start a new daemon with the same config
 ```
 
-`stop`/`restart` go through the pidfile rather than the control socket, so they work even if the socket is wedged. Stopping is bounded: an idle long-poll is aborted immediately; a running job is killed locally (`SIGTERM`, then `SIGKILL` after a 10s grace period) and reported `ERROR`.
+Run these as the user the Client runs as, not under `sudo` (which would look for `client.json` in root's home). `stop`/`restart` go through the pidfile rather than the control socket, so they work even if the socket is wedged. Stopping is bounded: an idle long-poll is aborted immediately; a running job is killed locally (`SIGTERM`, then `SIGKILL` after a 10s grace period) and reported `ERROR`.
 
 With several instances on one host, target the right one with `--config` before the subcommand:
 
 ```bash
-thub-client --config /etc/thub/dut1.json status
-sudo thub-client --config /etc/thub/dut1.json lock --reason "debugging I2C"
+thub-client --config ~/.config/thub/dut1.json status
+thub-client --config ~/.config/thub/dut1.json lock --reason "debugging I2C"
 ```
 
 ## Job execution lifecycle
