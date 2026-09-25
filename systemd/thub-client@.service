@@ -3,18 +3,26 @@ Description=TestHub Client (%i)
 After=network-online.target docker.service
 Wants=network-online.target
 
+# User, Group, SupplementaryGroups, THUB_CLIENT_CONFIG, WorkingDirectory,
+# ReadWritePaths and ExecStart are rewritten by
+# scripts/install-systemd-unit.js at install time to the user who ran
+# `sudo npm i -g`, their ~/.config/thub and ~/var/lib/thub/client, and this
+# install's real node/daemon.js paths. The instance name selects the config
+# file: thub-client@dut0 reads ~/.config/thub/dut0.json.
 [Service]
 Type=simple
 User=thub
 Group=thub
-Environment=THUB_CLIENT_CONFIG=%h/.config/thub/%i.json
+SupplementaryGroups=dialout plugdev docker
+Environment=THUB_CLIENT_CONFIG=/home/thub/.config/thub/%i.json
+WorkingDirectory=/home/thub/var/lib/thub/client
 ExecStart=/usr/bin/node /usr/lib/node_modules/@andrian.yablonskyy/thub-client/src/daemon.js
 Restart=always
 RestartSec=2
 NoNewPrivileges=yes
 ProtectSystem=strict
-ReadWritePaths=/var/lib/thub /run/thub
-RuntimeDirectory=thub
+PrivateTmp=yes
+ReadWritePaths=/home/thub/var/lib/thub/client
 
 [Install]
 WantedBy=multi-user.target
