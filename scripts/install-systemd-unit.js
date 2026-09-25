@@ -26,6 +26,11 @@ const fs = require('node:fs'),
   UNIT_SRC = path.join(__dirname, '..', 'systemd', UNIT_NAME),
   DAEMON_PATH = path.join(__dirname, '..', 'src', 'daemon.js'),
   UNIT_DEST = `/etc/systemd/system/${UNIT_NAME}`,
+  // Root-side self-update (README §10.2): the path unit watches the
+  // update request a Client writes, the service installs it.
+  UPDATE_PATH_UNIT = 'thub-client-update.path',
+  UPDATE_SERVICE_UNIT = 'thub-client-update.service',
+  UPDATE_HELPER = path.join(__dirname, 'self-update-helper.js'),
   MANUAL_HINT = 'sudo npm i -g @andrian.yablonskyy/thub-client',
 
   // Device access (serial adapters, ST-Link/USB probes) and, for SW
@@ -61,6 +66,19 @@ function renderUnit(user, paths){
     .replace(/^WorkingDirectory=.*$/m, `WorkingDirectory=${paths.varDir}`)
     .replace(/^ExecStart=.*$/m, `ExecStart=${process.execPath} ${DAEMON_PATH} --name %i`)
     .replace(/^ReadWritePaths=.*$/m, `ReadWritePaths=${writable}`);
+}
+
+function renderUpdateUnits(user, paths){
+  const nodeDir = path.dirname(process.execPath),
+    unitPath = (name) => path.join(__dirname, '..', 'systemd', name);
+  return {
+    [UPDATE_PATH_UNIT]: fs.readFileSync(unitPath(UPDATE_PATH_UNIT), 'utf8')
+      .replace(/^PathModified=.*$/m, `PathModified=${paths.updateRequestFile}`),
+    // npm is a `#!/usr/bin/env node` script, so this node goes first on PATH.
+    [UPDATE_SERVICE_UNIT]: fs.readFileSync(unitPath(UPDATE_SERVICE_UNIT), 'utf8')
+      .replace(/^Environment=PATH=.*$/m, `Environment=PATH=${nodeDir}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`)
+      .replace(/^ExecStart=.*$/m, `ExecStart=${process.execPath} ${UPDATE_HELPER} ${paths.updateRequestFile} ${user.name} ${paths.runDir}`)
+  };
 }
 
 // Same check the daemon itself makes (config.js, daemon.js
@@ -102,8 +120,13 @@ function main(){
   let step = 'write';
   try {
     fs.writeFileSync(UNIT_DEST, renderUnit(user, paths));
+    for (const [name, content]of Object.entries(renderUpdateUnits(user, paths))){
+      fs.writeFileSync(`/etc/systemd/system/${name}`, content);
+    }
     step = 'daemon-reload';
     execFileSync('systemctl', ['daemon-reload'], { stdio: 'ignore' });
+    step = `enable ${UPDATE_PATH_UNIT}`;
+    execFileSync('systemctl', ['enable', '--now', UPDATE_PATH_UNIT], { stdio: 'ignore' });
 
     step = 'list-units';
     const restart = new Set(activeInstances());

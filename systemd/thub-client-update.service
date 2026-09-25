@@ -1,0 +1,18 @@
+[Unit]
+Description=TestHub Client self-update
+After=network-online.target
+Wants=network-online.target
+
+# ExecStart and Environment= are rewritten by scripts/install-systemd-unit.js
+# to this install's real node and helper paths, the request file, and the
+# user the Client runs as. Runs as root: `npm i -g` writes the global
+# node_modules, and its postinstall re-renders these units and restarts every
+# running thub-client@ instance (once none is busy). The helper only ever installs
+# @andrian.yablonskyy/thub-client, at a strictly validated version.
+[Service]
+Type=oneshot
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/usr/bin/node /usr/lib/node_modules/@andrian.yablonskyy/thub-client/scripts/self-update-helper.js /home/thub/var/lib/thub/client/update-request.json thub /home/thub/var/lib/thub/client
+# The helper first waits (up to 24h) until no instance has a job running or
+# a local lock, since the install restarts all of them.
+TimeoutStartSec=infinity

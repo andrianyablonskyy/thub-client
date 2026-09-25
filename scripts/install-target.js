@@ -77,6 +77,9 @@ function targetPaths(user){
     varDir,
     runDir,
     workDir: path.join(varDir, 'work'),
+    // Host-wide (not per instance): written by a Client asked to
+    // self-update, watched by thub-client-update.path (README §10.2).
+    updateRequestFile: path.join(varDir, 'update-request.json'),
     instance: DEFAULT_INSTANCE
   };
 }

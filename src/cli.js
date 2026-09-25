@@ -18,11 +18,13 @@
 
 const fs = require('node:fs'),
   path = require('node:path'),
-  { spawn } = require('node:child_process'),
+  { spawn, spawnSync } = require('node:child_process'),
   { Command } = require('commander'),
   { loadConfig } = require('./config'),
   { sendCommand } = require('./control-socket'),
-  { register, deregister } = require('./instances');
+  { register, deregister } = require('./instances'),
+  { PACKAGES, fetchLatestVersion, isNewer, isValidVersion, npmBin } = require('@andrian.yablonskyy/thub-common'),
+  { version } = require('../package.json');
 
 const DAEMON_ENTRY = path.join(__dirname, 'daemon.js'),
   // Bounded by runner.js's KILL_GRACE_MS (10s) for an active job's SIGTERM
@@ -196,5 +198,47 @@ program
   .description('Stop/disable thub-client@<name> and remove its config (client.json itself is kept)')
   .option('-n, --name <name>', 'Instance name', 'client')
   .action((opts) => runOrExit(() => deregister(opts.name)));
+
+// Manual update (README §10.2); the Coordinator-initiated one goes
+// through thub-client-update.service instead.
+program
+  .command('check-update')
+  .description('Compare this Client with the latest published version')
+  .action(async () => {
+    try {
+      const latest = await fetchLatestVersion(PACKAGES.client);
+      console.log(`Installed: v${version}  Latest: v${latest}`);
+      console.log(isNewer(latest, version) ? 'Update available: thub-client self-update' : 'Up to date.');
+    }
+    catch (err){
+      console.error(`Error: ${err.message}`);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('self-update')
+  .description('Update this Client with sudo npm i -g (restarts every running instance)')
+  .option('--to <x.y.z>', 'Install this version instead of the latest')
+  .action(async (opts) => {
+    try {
+      const target = opts.to || await fetchLatestVersion(PACKAGES.client);
+      if (!isValidVersion(target)){
+        throw new Error(`Invalid version "${target}"`);
+      }
+      if (!opts.to && !isNewer(target, version)){
+        console.log(`Already on v${version}.`);
+        return;
+      }
+      const npmArgs = ['i', '-g', `${PACKAGES.client}@${target}`],
+        [bin, argv] = process.getuid?.() === 0 ? [npmBin(), npmArgs] : ['sudo', [npmBin(), ...npmArgs]];
+      console.log(`Updating v${version} -> v${target}: ${[bin, ...argv].join(' ')}`);
+      process.exit(spawnSync(bin, argv, { stdio: 'inherit' }).status ?? 1);
+    }
+    catch (err){
+      console.error(`Error: ${err.message}`);
+      process.exit(1);
+    }
+  });
 
 program.parseAsync(process.argv);
