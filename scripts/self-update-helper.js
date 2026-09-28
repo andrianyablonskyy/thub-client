@@ -54,15 +54,24 @@ async function busyInstances(runDir){
   return busy;
 }
 
-async function waitUntilIdle(runDir){
+// A Client removes the hold when an admin cancels the update from the
+// Coordinator's resource card (daemon.js _cancelSelfUpdate).
+function canceled(holdFile){
+  return !fs.existsSync(holdFile);
+}
+
+async function waitUntilIdle(runDir, holdFile){
   const deadline = Date.now() + MAX_WAIT_MS;
   for (;;){
+    if (canceled(holdFile)){
+      return 'canceled';
+    }
     const busy = await busyInstances(runDir);
     if (!busy.length){
-      return true;
+      return 'idle';
     }
     if (Date.now() > deadline){
-      return false;
+      return 'timeout';
     }
     console.log(`thub-client-update: waiting for ${busy.join(', ')} to finish (job running or locally locked)`);
     await new Promise((resolve) => setTimeout(resolve, POLL_MS));
@@ -121,7 +130,13 @@ async function main(){
   try {
     console.log(`thub-client-update: holding new jobs for v${target}; waiting for running jobs and uploads to finish`);
     await new Promise((resolve) => setTimeout(resolve, HOLD_GRACE_MS));
-    if (!await waitUntilIdle(runDir)){
+    const outcome = await waitUntilIdle(runDir, holdFile);
+    // Last check right before the point of no return.
+    if (outcome === 'canceled' || canceled(holdFile)){
+      console.log('thub-client-update: canceled from the Coordinator — not installing');
+      return 0;
+    }
+    if (outcome === 'timeout'){
       console.error('thub-client-update: instances stayed busy for 24h — giving up; restart a Client to ask again');
       return 1;
     }

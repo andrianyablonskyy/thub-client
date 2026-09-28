@@ -21,7 +21,11 @@ function createControlSocketServer(socketPath, handlers){
   fs.mkdirSync(require('node:path').dirname(socketPath), { recursive: true });
   fs.rmSync(socketPath, { force: true });
 
-  const server = net.createServer((socket) => {
+  // allowHalfOpen: the CLI half-closes after sending its command
+  // (sendCommand's socket.end), and without this the socket would close
+  // before a handler that awaits (lock/unlock report to the Coordinator)
+  // could write its reply.
+  const server = net.createServer({ allowHalfOpen: true }, (socket) => {
     let buf = '';
     socket.on('data', async (chunk) => {
       buf += chunk;

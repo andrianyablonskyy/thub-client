@@ -53,6 +53,9 @@ class Daemon{
     this.client = null;
     this.localLock = { locked: false, reason: null };
     this.activeJobId = null;
+    // What this instance is doing and since when (monotonic clock), for
+    // the dashboard's "Task / status" duration — see _touchActivity().
+    this.activity = { key: 'idle', state: 'idle', jobId: null, since: performance.now() };
     this.runner = null;
     this.stopped = false;
     this.controlServer = null;
@@ -123,11 +126,13 @@ class Daemon{
     this.controlServer = createControlSocketServer(this.config.socketPath, {
       lock: async ({ reason }) => {
         this.localLock = { locked: true, reason: reason || null };
+        this._touchActivity();
         await this._reportStatus();
         return { locked: true };
       },
       unlock: async () => {
         this.localLock = { locked: false, reason: null };
+        this._touchActivity();
         await this._reportStatus();
         return { locked: false };
       },
@@ -167,6 +172,7 @@ class Daemon{
       return;
     }
     this.updateHold = held;
+    this._touchActivity();
     console.log(held ? 'self-update in progress: not taking new jobs' : 'self-update hold released');
     await this._reportStatus().catch((err) => console.error('status report failed:', err.message));
   }
@@ -221,6 +227,19 @@ class Daemon{
     }
   }
 
+  // Current activity: running a job (until it's fully finished, uploads
+  // included), manually locked, held for a self-update, or idle. Called on
+  // every transition, so `since` is exact rather than heartbeat-granular.
+  _touchActivity(){
+    const [state, jobId] = this.activeJobId
+        ? ['job', this.activeJobId]
+        : this.localLock.locked ? ['locked', null] : this.updateHold ? ['update-hold', null] : ['idle', null],
+      key = `${state}:${jobId || ''}`;
+    if (key !== this.activity.key){
+      this.activity = { key, state, jobId, since: performance.now() };
+    }
+  }
+
   async _heartbeat(){
     const { commands } = await this.client.post(`/resources/${this.resourceId}/heartbeat`, {
       state: this.activeJobId || this.localLock.locked || this.updateHold ? 'busy' : 'idle',
@@ -228,7 +247,15 @@ class Daemon{
       localLock: this.localLock.locked || this.updateHold,
       // Re-sent every time so a DHCP renewal or a cable moved to another
       // port shows up without restarting the Client.
-      addresses: localAddresses()
+      addresses: localAddresses(),
+      // Relative, not timestamps, so the Coordinator can place them on its
+      // own clock regardless of this host's clock (README §10).
+      hostUptimeSec: Math.round(os.uptime()),
+      activity: {
+        state: this.activity.state,
+        jobId: this.activity.jobId,
+        durationSec: Math.round((performance.now() - this.activity.since) / 1000)
+      }
     });
 
     for (const command of commands || []){
@@ -240,6 +267,16 @@ class Daemon{
       }
       else if (command.command === 'self-update'){
         this._requestSelfUpdate(command.version);
+      }
+      // Cancel from the Coordinator's resource card (README §10).
+      else if (command.command === 'unlock' && this.localLock.locked){
+        console.log('local lock released from the Coordinator');
+        this.localLock = { locked: false, reason: null };
+        this._touchActivity();
+        await this._reportStatus().catch((err) => console.error('status report failed:', err.message));
+      }
+      else if (command.command === 'cancel-update'){
+        this._cancelSelfUpdate();
       }
     }
   }
@@ -274,6 +311,23 @@ class Daemon{
     }
   }
 
+  // Removing the hold (and any not-yet-picked-up request) is the cancel
+  // signal for the root update helper, which checks for it until the very
+  // moment it would install. The hold is host-wide, so this cancels the
+  // update for every instance on the host.
+  _cancelSelfUpdate(){
+    for (const file of [this.config.updateRequestFile, this.config.updateHoldFile]){
+      try {
+        fs.rmSync(file, { force: true });
+      }
+      catch (err){
+        console.error(`cancel self-update: ${err.message}`);
+      }
+    }
+    this.requestedUpdate = null; // a later request for the same version works again
+    console.log('self-update canceled from the Coordinator');
+  }
+
   async _pollForJob(){
     this.pollAbort = new AbortController();
     let job;
@@ -292,6 +346,7 @@ class Daemon{
 
     console.log(`Job ${job.id} queued`);
     this.activeJobId = job.id;
+    this._touchActivity();
     this.runner = new JobRunner(this.client, this.config);
     try {
       await this.runner.run(job);
@@ -299,6 +354,7 @@ class Daemon{
     finally {
       this.activeJobId = null;
       this.runner = null;
+      this._touchActivity();
     }
   }
 
