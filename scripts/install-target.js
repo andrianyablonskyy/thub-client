@@ -80,6 +80,9 @@ function targetPaths(user){
     // Host-wide (not per instance): written by a Client asked to
     // self-update, watched by thub-client-update.path (README §10.2).
     updateRequestFile: path.join(varDir, 'update-request.json'),
+    // Written once any thub-client@ instance exists; from then on an
+    // install never starts the default instance itself (install-systemd-unit.js).
+    instancesMarkerFile: path.join(varDir, '.instances-set-up'),
     instance: DEFAULT_INSTANCE
   };
 }

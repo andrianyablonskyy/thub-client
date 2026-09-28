@@ -92,13 +92,60 @@ function isConfigured(paths){
   return Boolean(raw.joinKey) || fs.existsSync(raw.tokenFile || path.join(paths.varDir, `${paths.instance}.token`));
 }
 
-function activeInstances(){
+function listInstances(extraArgs){
   const out = execFileSync(
     'systemctl',
-    ['list-units', '--type=service', '--state=active', '--plain', '--no-legend', 'thub-client@*'],
+    ['list-units', '--type=service', '--plain', '--no-legend', ...extraArgs, 'thub-client@*'],
     { encoding: 'utf8' }
   );
   return out.split('\n').map((l) => l.trim().split(/\s+/)[0]).filter(Boolean);
+}
+
+function activeInstances(){
+  return listInstances(['--state=active']);
+}
+
+// Instances enabled to start at boot: their symlinks in any *.wants dir.
+function enabledInstances(){
+  const root = '/etc/systemd/system',
+    found = [];
+  let dirs = [];
+  try {
+    dirs = fs.readdirSync(root).filter((d) => d.endsWith('.wants'));
+  }
+  catch {
+    return found;
+  }
+  for (const dir of dirs){
+    try {
+      found.push(...fs.readdirSync(path.join(root, dir)).filter((f) => /^thub-client@.+\.service$/.test(f)));
+    }
+    catch {
+      // not a directory / unreadable
+    }
+  }
+  return found;
+}
+
+// The default instance is only ever set up on a fresh machine (README
+// §8.5): one where no thub-client@ instance has been set up before —
+// none enabled, none known to systemd (even stopped or failed), and no
+// marker from an earlier install. Otherwise an upgrade would bring
+// thub-client@client up next to the instances actually in use, since
+// client.json stays filled in as the template `thub-client register`
+// copies. The marker keeps a host where every instance was deliberately
+// disabled from counting as fresh again.
+function isFreshMachine(markerFile){
+  return !fs.existsSync(markerFile) && !enabledInstances().length && !listInstances(['--all']).length;
+}
+
+function markSetUp(markerFile){
+  try {
+    fs.writeFileSync(markerFile, `instances set up; the default instance is no longer started automatically (${new Date().toISOString()})\n`);
+  }
+  catch (err){
+    console.warn(`thub-client: could not write ${markerFile} (${err.message})`);
+  }
 }
 
 // Best-effort, never fails the `npm install` itself. Runs after
@@ -129,8 +176,9 @@ function main(){
     execFileSync('systemctl', ['enable', '--now', UPDATE_PATH_UNIT], { stdio: 'ignore' });
 
     step = 'list-units';
-    const restart = new Set(activeInstances());
-    if (isConfigured(paths)){
+    const restart = new Set(activeInstances()),
+      fresh = isFreshMachine(paths.instancesMarkerFile);
+    if (fresh && isConfigured(paths)){
       step = 'enable';
       execFileSync('systemctl', ['enable', defaultUnit], { stdio: 'ignore' });
       restart.add(defaultUnit);
@@ -139,12 +187,15 @@ function main(){
       step = `restart ${unit}`;
       execFileSync('systemctl', ['restart', unit], { stdio: 'ignore' });
     }
+    if (!fresh || restart.size){
+      markSetUp(paths.instancesMarkerFile);
+    }
 
     console.log(`thub-client: installed ${UNIT_DEST} (runs as ${user.name}, configs in ${paths.configDir})`);
     if (restart.size){
       console.log(`thub-client: (re)started ${[...restart].join(', ')} (logs: journalctl -u 'thub-client@*')`);
     }
-    if (!restart.has(defaultUnit)){
+    if (fresh && !restart.has(defaultUnit)){
       console.log(
         `thub-client: set coordinatorUrl/joinKey in ${paths.configPath}, then start it with:\n` +
           `  sudo systemctl enable --now ${defaultUnit}`

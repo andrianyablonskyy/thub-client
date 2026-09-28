@@ -17,7 +17,7 @@ That one command is the complete installation. Run as root on Linux, for the use
 - install `udev/99-thub.rules` to `/etc/udev/rules.d` (stable `/dev/thub/dut<N>-uart|usb|stlink` paths for HW Clients) and reload udev;
 - install `/etc/systemd/system/thub-client@.service`, rendered for that user: `User=`/`Group=`, `SupplementaryGroups=` whichever of `dialout`, `plugdev` and `docker` exist on the host, `THUB_CLIENT_CONFIG=~/.config/thub/%i.json`, the state directory as `WorkingDirectory=`/`ReadWritePaths=`, and `ExecStart` pointing at this install's real `node`/`daemon.js` (works with `apt`-installed Node, `nvm` or any npm prefix) with `--name %i`, so each instance registers under its own instance name;
 - install and enable `thub-client-update.path`/`.service`, the root helper that applies self-updates requested from the Coordinator (see "Updates" below);
-- enable and (re)start `thub-client@client` once `client.json` is filled in, and restart every other running `thub-client@*` instance, so an upgrade takes effect immediately.
+- on a **fresh machine** only (no `thub-client@*` instance set up before), enable and start `thub-client@client` once `client.json` is filled in. On an already set-up host an install never enables or starts the default instance; it only restarts the instances already running, so an upgrade takes effect immediately.
 
 On a fresh install the service isn't started yet — the daemon would exit at once with blank required fields. Fill in the config, then start it (below).
 
