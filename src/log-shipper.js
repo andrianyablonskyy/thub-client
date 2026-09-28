@@ -100,6 +100,17 @@ class LogShipper{
     fs.rmSync(this.spoolPath, { force: true });
   }
 
+  // Ships everything pushed so far (waiting out a send in progress) without
+  // stopping — called right before a job's result is posted, since the
+  // Coordinator ends the live log stream on the result: lines still queued
+  // then would only be stored, never shown to `thub run --wait`.
+  async drain(){
+    for (let i = 0; this.sending && i < 200; i++){
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    await this._flush();
+  }
+
   async stop(){
     this.stopped = true;
     clearInterval(this.timer);

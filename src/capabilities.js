@@ -24,6 +24,10 @@ function device(entry, extra = {}){
 }
 
 function describeCapabilities(config){
+  return { ...describeTyped(config), allowJobCommands: Boolean(config.allowJobCommands) };
+}
+
+function describeTyped(config){
   if (config.type === 'sw'){
     const sw = config.sw || {};
     return {

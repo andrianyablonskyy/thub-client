@@ -17,7 +17,7 @@ const fs = require('node:fs'),
   path = require('node:path'),
   { spawn } = require('node:child_process'),
   { JOB_STATES } = require('@andrian.yablonskyy/thub-common'),
-  { downloadFirmware, downloadAndExtractTests } = require('./downloader'),
+  { downloadFirmware, fetchTests } = require('./downloader'),
   { LogShipper } = require('./log-shipper'),
   { HwExecutor } = require('./executors/hw'),
   { SwExecutor } = require('./executors/sw');
@@ -90,16 +90,24 @@ class JobRunner{
 
     try {
       await this.client.post(`/jobs/${job.id}/accept`);
+      // Checked again here, not only by the Coordinator's scheduling: the
+      // setting may have been turned off since this Client registered.
+      if (job.spec.tests.command && !this.config.allowJobCommands){
+        throw new Error('This Client doesn\'t run job-supplied commands (--run) — set "allowJobCommands": true in its config');
+      }
 
       // firmware.image (SW only): the job's own Docker image is the DUT —
       // nothing to download, the executor pulls it.
       let fwPath = null;
       if (job.spec.firmware.url){
         logShipper.push('runner', `downloading firmware ${job.spec.firmware.url}`);
-        fwPath = await downloadFirmware(job.spec, jobDir, this.config.artifactory, { signal: this.abort.signal });
+        fwPath = await downloadFirmware(job.spec, jobDir, this.config, { signal: this.abort.signal });
       }
-      logShipper.push('runner', `downloading tests ${job.spec.tests.url}`);
-      const testsDir = await downloadAndExtractTests(job.spec, jobDir, this.config.artifactory, { signal: this.abort.signal });
+      const { testsDir, commit } = await fetchTests(job.spec, jobDir, this.config, {
+        signal: this.abort.signal,
+        log: (line) => logShipper.push('runner', line)
+      });
+      this.testsCommit = commit;
       if (this.canceled){
         return this._bail(job, executor, logShipper);
       }
@@ -126,6 +134,7 @@ class JobRunner{
 
       const summary = summarizeJUnit(resultFiles.filter((f) => f.endsWith('.xml'))),
         state = exitCode === 0 ? JOB_STATES.PASSED : JOB_STATES.FAILED;
+      await logShipper.drain().catch(() => {}); // all output in before the stream ends
       await this.client.post(`/jobs/${job.id}/result`, { state, exitCode, summary });
       this._announce(state);
       this._announceFinished(state);
@@ -133,6 +142,7 @@ class JobRunner{
     catch (err){
       logShipper.push('runner', this.canceled ? 'job canceled' : `ERROR: ${err.message}`);
       if (!this.canceled){
+        await logShipper.drain().catch(() => {});
         await this.client
           .post(`/jobs/${job.id}/result`, { state: JOB_STATES.ERROR, exitCode: null, summary: { error: err.message } })
           .catch(() => {});
@@ -194,13 +204,8 @@ class JobRunner{
           : `[dry-run] would download firmware ${job.spec.firmware.url}` +
             (job.spec.firmware.sha256 ? ` (sha256 ${job.spec.firmware.sha256})` : '')
       );
-      logShipper.push('runner', `[dry-run] would download tests ${job.spec.tests.url}`);
-      const suite = job.spec.tests.suite || 'default',
-        args = job.spec.tests.args || [];
-      logShipper.push(
-        'runner',
-        `[dry-run] would run: run-tests.sh --suite ${suite}${args.length ? ' ' + args.join(' ') : ''}`
-      );
+      logShipper.push('runner', `[dry-run] would fetch tests ${describeTestSources(job.spec.tests)}`);
+      logShipper.push('runner', `[dry-run] would run: ${describeTestCommand(job.spec.tests)}`);
       for (const [key, value]of Object.entries(metaToEnv(job.spec.meta))){
         logShipper.push('runner', `[dry-run] ${key}=${value}`);
       }
@@ -245,13 +250,27 @@ class JobRunner{
     }
   }
 
+  // The job's own command (tests.command, via `sh -c` with --arg values as
+  // "$@") if given, else the sources' run-tests.sh --suite <suite> <args>.
   _runTests(job, testsDir, executor, logShipper){
     return new Promise((resolve, reject) => {
-      const entry = path.join(testsDir, 'run-tests.sh'),
-        args = ['--suite', job.spec.tests.suite || 'default', ...(job.spec.tests.args || [])];
-      this.child = spawn(entry, args, {
+      const { command, suite = 'default', args = [] } = job.spec.tests,
+        entry = path.join(testsDir, 'run-tests.sh');
+      if (!command && !fs.existsSync(entry)){
+        return reject(new Error('The test sources have no run-tests.sh — add one, or start them with --run "<command>"'));
+      }
+      logShipper.push('runner', `running: ${describeTestCommand(job.spec.tests)}`);
+      const [cmd, argv] = command ? ['sh', ['-c', command, 'thub-job', ...args]] : [entry, ['--suite', suite, ...args]];
+      this.child = spawn(cmd, argv, {
         cwd: testsDir,
-        env: { ...process.env, ...executor.envFor(), ...metaToEnv(job.spec.meta) }
+        env: {
+          ...process.env,
+          ...executor.envFor(),
+          ...metaToEnv(job.spec.meta),
+          THUB_JOB_ID: job.id,
+          THUB_SUITE: suite,
+          ...(this.testsCommit ? { THUB_TESTS_COMMIT: this.testsCommit } : {})
+        }
       });
       this.child.stdout.on('data', (d) => logShipper.push('runner', d.toString('utf8').trimEnd()));
       this.child.stderr.on('data', (d) => logShipper.push('runner', d.toString('utf8').trimEnd()));
@@ -262,6 +281,22 @@ class JobRunner{
       });
     });
   }
+}
+
+function describeTestSources(tests){
+  if (!tests.git){
+    return tests.url;
+  }
+  const { branch, tag, commit } = tests.git,
+    ref = branch ? `branch ${branch}` : tag ? `tag ${tag}` : commit ? `commit ${commit}` : 'default branch';
+  return `${tests.git.url} (${ref})`;
+}
+
+function describeTestCommand(tests){
+  const args = tests.args || [];
+  return tests.command
+    ? `sh -c ${JSON.stringify(tests.command)}${args.length ? ` (args: ${args.join(' ')})` : ''}`
+    : `run-tests.sh --suite ${tests.suite || 'default'}${args.length ? ' ' + args.join(' ') : ''}`;
 }
 
 // Exposes `--meta key=value` from the Agent (§7.1 — CI job id, git repo/
@@ -325,7 +360,8 @@ function dryRunReport(job){
     (job.spec.user ? `user:     ${job.spec.user}\n` : '') +
     `target:   ${job.spec.target.type} labels=${(job.spec.target.labels || []).join(',') || '(none)'}\n` +
     `${job.spec.firmware.image ? `image: ${job.spec.firmware.image}` : `firmware: ${job.spec.firmware.url}`}\n` +
-    `tests:    ${job.spec.tests.url} (suite=${job.spec.tests.suite || 'default'})\n` +
+    `tests:    ${describeTestSources(job.spec.tests)} (suite=${job.spec.tests.suite || 'default'})\n` +
+    `run:      ${describeTestCommand(job.spec.tests)}\n` +
     `meta:     ${JSON.stringify(job.spec.meta || {})}\n`
   );
 }

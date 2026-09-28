@@ -37,7 +37,8 @@
     "power": { "method": "relay" }
   },
   "sw": {
-    "image": "dockerhub.io/ubuntu:minimal",
+    "image": "alpine",
+    "allowJobImages": true,
     "cpus": 1,
     "memory": "100m"
   }

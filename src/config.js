@@ -109,6 +109,15 @@ function loadConfig(configPath = process.env.THUB_CLIENT_CONFIG, overrides = {})
       // update is being applied: no instance takes new jobs meanwhile.
       updateHoldFile: raw.updateHoldFile || path.join(varDir, 'update-hold.json'),
       artifactory: resolveArtifactoryConfig(raw.artifactory || {}),
+      // Other download sources for firmware and test sources (archives, git
+      // repos) — URL prefixes, "*" for any. Never sent the Artifactory token
+      // (downloader.js downloadAccess).
+      sources: { allowedPrefixes: Array.isArray(raw.sources?.allowedPrefixes) ? raw.sources.allowedPrefixes : [] },
+      // Run a job's own start command (`thub run --run "..."`, tests.command)
+      // instead of the sources' run-tests.sh. Off by default: it gives anyone
+      // holding an agent token a shell on this host, as the Client's user.
+      // Reported to the Coordinator, which only schedules such jobs here when on.
+      allowJobCommands: raw.allowJobCommands === true,
       hw,
       sw: resolveSwConfig(raw.sw || {}),
       heartbeatIntervalSec: raw.heartbeatIntervalSec || 10,
