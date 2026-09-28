@@ -91,8 +91,13 @@ class JobRunner{
     try {
       await this.client.post(`/jobs/${job.id}/accept`);
 
-      logShipper.push('runner', `downloading firmware ${job.spec.firmware.url}`);
-      const fwPath = await downloadFirmware(job.spec, jobDir, this.config.artifactory, { signal: this.abort.signal });
+      // firmware.image (SW only): the job's own Docker image is the DUT —
+      // nothing to download, the executor pulls it.
+      let fwPath = null;
+      if (job.spec.firmware.url){
+        logShipper.push('runner', `downloading firmware ${job.spec.firmware.url}`);
+        fwPath = await downloadFirmware(job.spec, jobDir, this.config.artifactory, { signal: this.abort.signal });
+      }
       logShipper.push('runner', `downloading tests ${job.spec.tests.url}`);
       const testsDir = await downloadAndExtractTests(job.spec, jobDir, this.config.artifactory, { signal: this.abort.signal });
       if (this.canceled){
@@ -100,7 +105,7 @@ class JobRunner{
       }
 
       logShipper.push('runner', 'preparing DUT');
-      await executor.prepare(job, job.spec.target.type === 'hw' ? fwPath : path.dirname(fwPath));
+      await executor.prepare(job, job.spec.target.type === 'hw' || !fwPath ? fwPath : path.dirname(fwPath));
       if (this.canceled){
         return this._bail(job, executor, logShipper);
       }
@@ -184,8 +189,10 @@ class JobRunner{
       );
       logShipper.push(
         'runner',
-        `[dry-run] would download firmware ${job.spec.firmware.url}` +
-          (job.spec.firmware.sha256 ? ` (sha256 ${job.spec.firmware.sha256})` : '')
+        job.spec.firmware.image
+          ? `[dry-run] would run Docker image ${job.spec.firmware.image} as the DUT`
+          : `[dry-run] would download firmware ${job.spec.firmware.url}` +
+            (job.spec.firmware.sha256 ? ` (sha256 ${job.spec.firmware.sha256})` : '')
       );
       logShipper.push('runner', `[dry-run] would download tests ${job.spec.tests.url}`);
       const suite = job.spec.tests.suite || 'default',
@@ -317,7 +324,7 @@ function dryRunReport(job){
     `job:      ${job.id}\n` +
     (job.spec.user ? `user:     ${job.spec.user}\n` : '') +
     `target:   ${job.spec.target.type} labels=${(job.spec.target.labels || []).join(',') || '(none)'}\n` +
-    `firmware: ${job.spec.firmware.url}\n` +
+    `${job.spec.firmware.image ? `image: ${job.spec.firmware.image}` : `firmware: ${job.spec.firmware.url}`}\n` +
     `tests:    ${job.spec.tests.url} (suite=${job.spec.tests.suite || 'default'})\n` +
     `meta:     ${JSON.stringify(job.spec.meta || {})}\n`
   );

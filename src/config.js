@@ -265,7 +265,18 @@ function resolveSwConfig(sw){
     }
     registryAuth = { username: auth.username, password, serveraddress: registry };
   }
-  return { ...sw, registry: registry || null, allowDockerHub: sw.allowDockerHub === true, registryAuth };
+  // allowJobImages: run a job's own Docker image (`thub run --type sw --image
+  // alpine`, spec firmware.image) instead of sw.image. Off by default: it lets
+  // anyone with an agent token pick the code this host runs (in the usual
+  // sandboxed container). Reported to the Coordinator, which only schedules
+  // such jobs here when it's on.
+  return {
+    ...sw,
+    registry: registry || null,
+    allowDockerHub: sw.allowDockerHub === true,
+    allowJobImages: sw.allowJobImages === true,
+    registryAuth
+  };
 }
 
 // §13: the Client's read-only Artifactory token lives in its own file
