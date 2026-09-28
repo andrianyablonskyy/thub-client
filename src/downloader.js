@@ -30,9 +30,10 @@ function assertAllowedUrl(url, allowedPrefixes){
   }
 }
 
-async function fetchToFile(url, destPath, { token } = {}){
+// `signal` lets a job cancel abort a download in progress (runner.js).
+async function fetchToFile(url, destPath, { token, signal } = {}){
   const headers = token ? { Authorization: `Bearer ${token}` } : {},
-    res = await fetch(url, { headers });
+    res = await fetch(url, { headers, signal });
   if (!res.ok){
     throw new Error(`Download failed (${res.status}) for ${url}`);
   }
@@ -46,10 +47,10 @@ function sha256File(filePath){
   return crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
 }
 
-async function downloadFirmware(spec, jobDir, artifactoryCfg){
+async function downloadFirmware(spec, jobDir, artifactoryCfg, { signal } = {}){
   assertAllowedUrl(spec.firmware.url, artifactoryCfg.allowedArtifactPrefixes);
   const dest = path.join(jobDir, 'fw', path.basename(new URL(spec.firmware.url).pathname) || 'app.bin');
-  await fetchToFile(spec.firmware.url, dest, { token: artifactoryCfg.token });
+  await fetchToFile(spec.firmware.url, dest, { token: artifactoryCfg.token, signal });
   if (spec.firmware.sha256){
     const actual = sha256File(dest);
     if (actual !== spec.firmware.sha256){
@@ -59,10 +60,10 @@ async function downloadFirmware(spec, jobDir, artifactoryCfg){
   return dest;
 }
 
-async function downloadAndExtractTests(spec, jobDir, artifactoryCfg){
+async function downloadAndExtractTests(spec, jobDir, artifactoryCfg, { signal } = {}){
   assertAllowedUrl(spec.tests.url, artifactoryCfg.allowedArtifactPrefixes);
   const archive = path.join(jobDir, 'tests.tar.gz');
-  await fetchToFile(spec.tests.url, archive, { token: artifactoryCfg.token });
+  await fetchToFile(spec.tests.url, archive, { token: artifactoryCfg.token, signal });
   const testsDir = path.join(jobDir, 'tests');
   fs.mkdirSync(testsDir, { recursive: true });
   await new Promise((resolve, reject) => {

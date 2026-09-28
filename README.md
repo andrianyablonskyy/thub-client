@@ -107,6 +107,8 @@ If two instances instead share the exact same config file (told apart only by `n
 
 **Capabilities.** At every registration (each start/restart) the Client reports what this config lets it drive: for HW each `hw.stlinks`/`uarts`/`usbs` device (path, ST-Link serial, UART baud rate, and whether the device node exists right now), `hw.relays` and `hw.power`; for SW the image, its source and the CPU/memory limits. The Coordinator's resource card lists them and flags a configured device that's missing. After plugging in or moving an adapter, restart the instance to refresh them.
 
+**Heartbeats** (every `heartbeatIntervalSec`) report the state, the host's network addresses, the host's uptime and the current activity (idle, running a job until it's fully finished including uploads, locked locally, or held for a self-update) with its duration — shown on the Coordinator's resource card.
+
 **SW-only** (`type: sw`): `sw.image` (required — a plain repository name like `dut-emulator:2026.08`), `sw.registry` (local registry `host[:port]`), `sw.registryAuth` (`{ username, passwordFile | password }`), `sw.allowDockerHub` (default `false`), `sw.cpus` (default 2), `sw.memory` (default `2g`).
 
 The image is looked up in order: `sw.registry` first, then Docker Hub only if `sw.allowDockerHub` is `true`, and if neither has it the job fails with the reason for each source. An image already cached on the host counts for its source. An image that names its own registry host (`other.example.com/emu:1`) is pulled from that host only. A plain-HTTP registry must also be in the Docker daemon's `insecure-registries`.
@@ -159,6 +161,8 @@ A Client updates only when an admin requested it (Coordinator dashboard: per res
 2. waits 45 s so a job handed out just before the hold is visible, then waits (up to 24 h) until no instance has a job running or a manual lock;
 3. runs `npm i -g @andrian.yablonskyy/thub-client@<version>` for the Client's user. That restarts every instance on the new version;
 4. removes the hold, also on failure or `systemctl stop`. A hold older than 2 h is ignored.
+
+An admin can abort it until the moment it installs with **Cancel** on the Coordinator's resource card: the Client deletes the hold and the helper stops without installing. The same button cancels the Client's running job (aborting a download in progress) or releases a manual local lock.
 
 It only ever installs `thub-client`, at a strictly validated version. Logs: `journalctl -u thub-client-update`.
 

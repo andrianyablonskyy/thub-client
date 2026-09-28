@@ -31,6 +31,9 @@ class JobRunner{
     this.config = config;
     this.canceled = false;
     this.child = null;
+    // Aborts downloads in progress on cancel — without it a cancel only
+    // lands between steps, and a hung Artifactory would never let go.
+    this.abort = new AbortController();
     this.jobUser = null;
   }
 
@@ -43,6 +46,7 @@ class JobRunner{
   cancel(reportResult = false){
     this.canceled = true;
     this.reportResult = reportResult;
+    this.abort.abort();
     if (this.child){
       this.child.kill('SIGTERM');
       setTimeout(() => {
@@ -88,9 +92,9 @@ class JobRunner{
       await this.client.post(`/jobs/${job.id}/accept`);
 
       logShipper.push('runner', `downloading firmware ${job.spec.firmware.url}`);
-      const fwPath = await downloadFirmware(job.spec, jobDir, this.config.artifactory);
+      const fwPath = await downloadFirmware(job.spec, jobDir, this.config.artifactory, { signal: this.abort.signal });
       logShipper.push('runner', `downloading tests ${job.spec.tests.url}`);
-      const testsDir = await downloadAndExtractTests(job.spec, jobDir, this.config.artifactory);
+      const testsDir = await downloadAndExtractTests(job.spec, jobDir, this.config.artifactory, { signal: this.abort.signal });
       if (this.canceled){
         return this._bail(job, executor, logShipper);
       }
@@ -122,7 +126,7 @@ class JobRunner{
       this._announceFinished(state);
     }
     catch (err){
-      logShipper.push('runner', `ERROR: ${err.message}`);
+      logShipper.push('runner', this.canceled ? 'job canceled' : `ERROR: ${err.message}`);
       if (!this.canceled){
         await this.client
           .post(`/jobs/${job.id}/result`, { state: JOB_STATES.ERROR, exitCode: null, summary: { error: err.message } })
