@@ -4,12 +4,15 @@ After=network-online.target docker.service
 Wants=network-online.target
 
 # User, Group, SupplementaryGroups, THUB_CLIENT_CONFIG, WorkingDirectory,
-# ReadWritePaths and ExecStart are rewritten by
+# ReadWritePaths, ExecStartPre and ExecStart are rewritten by
 # scripts/install-systemd-unit.js at install time to the user who ran
 # `sudo npm i -g`, their ~/.config/thub and ~/var/lib/thub/client, and this
 # install's real node/daemon.js paths. The instance name selects the config
 # file and is passed to the daemon as --name, overriding the file's `name`:
 # thub-client@dut0 reads ~/.config/thub/dut0.json and registers as "dut0".
+# ExecStartPre's "+" runs it as root, outside the sandbox below: it writes
+# /etc/udev/rules.d/99-thub-%i.rules from the config's hw.* entries and
+# reloads udev, so the /dev/thub/* symlinks exist before the daemon starts.
 [Service]
 Type=simple
 User=thub
@@ -17,6 +20,7 @@ Group=thub
 SupplementaryGroups=dialout plugdev docker
 Environment=THUB_CLIENT_CONFIG=/home/thub/.config/thub/%i.json
 WorkingDirectory=/home/thub/var/lib/thub/client
+ExecStartPre=+/usr/bin/node /usr/lib/node_modules/@andrian.yablonskyy/thub-client/src/udev.js --config /home/thub/.config/thub/%i.json
 ExecStart=/usr/bin/node /usr/lib/node_modules/@andrian.yablonskyy/thub-client/src/daemon.js --name %i
 Restart=always
 RestartSec=2

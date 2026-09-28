@@ -14,8 +14,7 @@ That one command is the complete installation. Run as root on Linux, for the use
 
 - create `~/.config/thub` and `~/var/lib/thub/client` (with `work/`) — the state directory for tokens, client ids, job workspaces, control sockets and pidfiles;
 - create `~/.config/thub/client.json` (0600) if it doesn't exist yet, with blank `coordinatorUrl`/`joinKey`, `type: hw` and `varDir` pointing at the state directory — a re-install/upgrade never overwrites it;
-- install `udev/99-thub.rules` to `/etc/udev/rules.d` (stable `/dev/thub/dut<N>-uart|usb|stlink` paths for HW Clients) and reload udev;
-- install `/etc/systemd/system/thub-client@.service`, rendered for that user: `User=`/`Group=`, `SupplementaryGroups=` whichever of `dialout`, `plugdev` and `docker` exist on the host, `THUB_CLIENT_CONFIG=~/.config/thub/%i.json`, the state directory as `WorkingDirectory=`/`ReadWritePaths=`, and `ExecStart` pointing at this install's real `node`/`daemon.js` (works with `apt`-installed Node, `nvm` or any npm prefix) with `--name %i`, so each instance registers under its own instance name;
+- install `/etc/systemd/system/thub-client@.service`, rendered for that user: `User=`/`Group=`, `SupplementaryGroups=` whichever of `dialout`, `plugdev` and `docker` exist on the host, `THUB_CLIENT_CONFIG=~/.config/thub/%i.json`, the state directory as `WorkingDirectory=`/`ReadWritePaths=`, and `ExecStart` pointing at this install's real `node`/`daemon.js` (works with `apt`-installed Node, `nvm` or any npm prefix) with `--name %i`, so each instance registers under its own instance name, plus an `ExecStartPre=+` that generates the instance's udev rules as root on every start (see "udev rules" below);
 - install and enable `thub-client-update.path`/`.service`, the root helper that applies self-updates requested from the Coordinator (see "Updates" below);
 - on a **fresh machine** only (no `thub-client@*` instance set up before), enable and start `thub-client@client` once `client.json` is filled in. On an already set-up host an install never enables or starts the default instance; it only restarts the instances already running, so an upgrade takes effect immediately.
 
@@ -53,7 +52,7 @@ thub-client deregister --name dut1           # stop + disable thub-client@dut1, 
 
 Keep `varDir` at the one in `client.json` — the service can only write there, and every per-instance path under it is already namespaced by the config's filename. If you change `client.json`'s `varDir`/`runDir`, re-run `sudo npm i -g @andrian.yablonskyy/thub-client` so the unit's `ReadWritePaths=` follows.
 
-Every install step is best-effort and never fails the `npm install` itself, and only runs for an actual global install (`npm install -g`) — a plain local `npm install` (e.g. in a dev checkout, or as root inside a CI/Docker image, which is common) never touches `/etc/udev`, `/etc/systemd`, `~/.config/thub` or `~/var/lib/thub`. A global install without root, or on a non-Linux machine, still creates the directories and `client.json` for the current user, but skips udev/systemd and prints the `sudo npm i -g` command to run instead.
+Every install step is best-effort and never fails the `npm install` itself, and only runs for an actual global install (`npm install -g`) — a plain local `npm install` (e.g. in a dev checkout, or as root inside a CI/Docker image, which is common) never touches `/etc/systemd`, `~/.config/thub` or `~/var/lib/thub`. A global install without root, or on a non-Linux machine, still creates the directories and `client.json` for the current user, but skips systemd and prints the `sudo npm i -g` command to run instead.
 
 ## Running it directly (no systemd — after a global install, development, or a one-off manual run)
 
@@ -113,7 +112,7 @@ If two instances instead share the exact same config file (told apart only by `n
 
 The image is looked up in order: `sw.registry` first, then Docker Hub only if `sw.allowDockerHub` is `true`, and if neither has it the job fails with the reason for each source. An image already cached on the host counts for its source. An image that names its own registry host (`other.example.com/emu:1`) is pulled from that host only. A plain-HTTP registry must also be in the Docker daemon's `insecure-registries`.
 
-**HW-only** (`type: hw`): up to 8 each of `hw.stlinks`, `hw.uarts`, `hw.usbs` (entries: udev index 1–8 → `/dev/thub/dut<N>-stlink|uart|usb`, a path, or `{ index | path, ... }`; ST-Link entries may give `serial`, UARTs `baudRate`) and `hw.relays` (`{ channel: 0-7, baseUrl }`), plus `hw.power.method` (`uhubctl` or `relay`) and `hw.power.hub`/`.port` or `.baseUrl`. The legacy `hw.stlinkSerial`, `hw.uart` and `hw.power.relayIndex` still work.
+**HW-only** (`type: hw`): up to 8 each of `hw.stlinks`, `hw.uarts`, `hw.usbs` (entries: udev index 1–8 → `/dev/thub/dut<N>-stlink|uart|usb`, a path, or `{ index | path, ... }`; ST-Link entries may give `serial`, UARTs `baudRate`; any of them `devpath` plus optional `vendorId`/`productId`/`subsystem` to get a udev symlink rule) and `hw.relays` (`{ channel: 0-7, baseUrl }`), plus `hw.power.method` (`uhubctl` or `relay`) and `hw.power.hub`/`.port` or `.baseUrl`. The legacy `hw.stlinkSerial`, `hw.uart` and `hw.power.relayIndex` still work.
 
 Example SW config:
 
@@ -180,7 +179,9 @@ A cancel command or job timeout sends `SIGTERM` to the test process group, waits
 
 ### HW executor
 
-ST-Link via `st-flash`/`openocd`, UART via the `serialport` npm package, optional power cycling via `uhubctl` or a networked relay board's REST API (`hw.power.method: "relay"` — a **stub**, `src/relay-client.js`, pending the real board's API spec). Stable device paths come from udev rules (`/dev/thub/dut<N>-uart`, `/dev/thub/dut<N>-usb`, `/dev/thub/dut<N>-stlink`, N = 1–8). The job's firmware is flashed through the first ST-Link; every device is passed to the test runner as `THUB_DUT_UART_<n>`/`THUB_DUT_USB_<n>`/`THUB_DUT_STLINK_<n>`.
+ST-Link via `st-flash`/`openocd`, UART via the `serialport` npm package, optional power cycling via `uhubctl` or a networked relay board's REST API (`hw.power.method: "relay"` — a **stub**, `src/relay-client.js`, pending the real board's API spec). Stable device paths (`/dev/thub/dut<N>-uart`, `/dev/thub/dut<N>-usb`, `/dev/thub/dut<N>-stlink`, N = 1–8) come from udev rules the Client generates from its own config.
+
+**udev rules.** No udev setup at install time. On every start the Client writes `/etc/udev/rules.d/99-thub-<instance>.rules` from the `hw.stlinks`/`hw.uarts`/`hw.usbs` entries that have a `devpath` (the USB port path, `ATTRS{devpath}` in `udevadm info -a -n <device>`). It then reloads udev, re-triggers `usb`/`tty` devices and waits for them to settle, but only when the file actually changes. Defaults per kind: ST-Link `0483:3748` on `usb`, UART `0403:6001` on `tty`, USB `0483:5740` on `usb`; override them per entry with `vendorId`/`productId`/`subsystem`. Under systemd, the unit's `ExecStartPre=+` does this as root. Preview the rules with `thub-client [--config <path>] udev --print`, and apply them without a restart with `sudo thub-client [--config <path>] udev`. Upgrading from ≤ 1.0.17: move each `ATTR{devpath}` from the old `/etc/udev/rules.d/99-thub.rules` into the matching config entry, then delete that file. The job's firmware is flashed through the first ST-Link; every device is passed to the test runner as `THUB_DUT_UART_<n>`/`THUB_DUT_USB_<n>`/`THUB_DUT_STLINK_<n>`.
 
 ### SW executor
 
