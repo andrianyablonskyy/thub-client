@@ -20,7 +20,8 @@ const fs = require('node:fs'),
   path = require('node:path'),
   { spawn, spawnSync } = require('node:child_process'),
   { Command } = require('commander'),
-  { loadConfig } = require('./config'),
+  { loadConfig, loadDeviceConfig } = require('./config'),
+  { renderRules, syncUdevRules } = require('./udev'),
   { sendCommand } = require('./control-socket'),
   { register, deregister } = require('./instances'),
   { PACKAGES, fetchLatestVersion, isNewer, isValidVersion, npmBin } = require('@andrian.yablonskyy/thub-common'),
@@ -198,6 +199,25 @@ program
   .description('Stop/disable thub-client@<name> and remove its config (client.json itself is kept)')
   .option('-n, --name <name>', 'Instance name', 'client')
   .action((opts) => runOrExit(() => deregister(opts.name)));
+
+// The daemon does this on every start (README §8.2); this is for applying
+// a config change without a restart, or previewing the generated rules.
+program
+  .command('udev')
+  .description('Install this instance\'s udev rules from its hw.* config (needs root), or print them')
+  .option('--print', 'Only print the rules the config would generate', false)
+  .action((opts) => runOrExit(() => {
+    const cfg = loadDeviceConfig(program.opts().config);
+    if (opts.print){
+      process.stdout.write(renderRules(cfg) || '# no hw.* entries with a devpath — no rules\n');
+      return;
+    }
+    const { status, file } = syncUdevRules(cfg);
+    if (status === 'needs-root'){
+      throw new Error(`${file} needs updating — run this as root (sudo)`);
+    }
+    console.log(status === 'skipped' ? 'udev: not Linux — nothing to do' : `udev: ${file} ${status}`);
+  }));
 
 // Manual update (README §10.2); the Coordinator-initiated one goes
 // through thub-client-update.service instead.

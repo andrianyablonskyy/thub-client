@@ -25,6 +25,7 @@ const fs = require('node:fs'),
   UNIT_NAME = 'thub-client@.service',
   UNIT_SRC = path.join(__dirname, '..', 'systemd', UNIT_NAME),
   DAEMON_PATH = path.join(__dirname, '..', 'src', 'daemon.js'),
+  UDEV_SYNC_PATH = path.join(__dirname, '..', 'src', 'udev.js'),
   UNIT_DEST = `/etc/systemd/system/${UNIT_NAME}`,
   // Root-side self-update (README §10.2): the path unit watches the
   // update request a Client writes, the service installs it.
@@ -64,6 +65,7 @@ function renderUnit(user, paths){
     .replace(/^SupplementaryGroups=.*$/m, groups ? `SupplementaryGroups=${groups}` : '')
     .replace(/^Environment=THUB_CLIENT_CONFIG=.*$/m, `Environment=THUB_CLIENT_CONFIG=${paths.configDir}/%i.json`)
     .replace(/^WorkingDirectory=.*$/m, `WorkingDirectory=${paths.varDir}`)
+    .replace(/^ExecStartPre=.*$/m, `ExecStartPre=+${process.execPath} ${UDEV_SYNC_PATH} --config ${paths.configDir}/%i.json`)
     .replace(/^ExecStart=.*$/m, `ExecStart=${process.execPath} ${DAEMON_PATH} --name %i`)
     .replace(/^ReadWritePaths=.*$/m, `ReadWritePaths=${writable}`);
 }

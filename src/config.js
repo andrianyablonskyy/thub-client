@@ -31,8 +31,8 @@ const USER_CONFIG_PATH = path.join(os.homedir(), '.config', 'thub', 'client.json
   PACKAGE_DEFAULT_CONFIG_PATH = path.join(__dirname, '..', 'config.json'),
 
   // Upper bound on each HW device list (hw.uarts/usbs/stlinks/relays) and on
-  // Client instances per host — matching the dut1..dut8 symlinks in
-  // udev/99-thub.rules and a relay board's 8 channels (§8.2, §8.6).
+  // Client instances per host — matching the dut1..dut8 symlink naming
+  // (udev.js) and a relay board's 8 channels (§8.2, §8.6).
   MAX_SLOTS = 8;
 
 // Matches README.md §13 (~/.config/thub/client.json). `overrides.name` (the
@@ -40,7 +40,7 @@ const USER_CONFIG_PATH = path.join(os.homedir(), '.config', 'thub', 'client.json
 // over the file's `name`, which in turn defaults to the config file's
 // basename — the same thing as the systemd instance name, so the control
 // CLI (which never gets --name) loads a name-less config fine too.
-function loadConfig(configPath = process.env.THUB_CLIENT_CONFIG, overrides = {}){
+function findConfigFile(configPath){
   const candidate = [configPath, USER_CONFIG_PATH, PACKAGE_DEFAULT_CONFIG_PATH].find(
     (p) => p && fs.existsSync(p)
   );
@@ -49,13 +49,21 @@ function loadConfig(configPath = process.env.THUB_CLIENT_CONFIG, overrides = {})
       'Client config not found (set THUB_CLIENT_CONFIG, or create ~/.config/thub/client.json)'
     );
   }
-  const raw = JSON.parse(fs.readFileSync(candidate, 'utf8')) || {},
+  return candidate;
+}
 
-    // Per-instance defaults derived from the config file's own name (e.g.
-    // dut3.json -> dut3.token / dut3.sock / dut3.pid), so several Client
-    // instances on one host don't collide on a shared default path — each
-    // still overridable explicitly for non-standard layouts.
-    instance = path.basename(candidate, path.extname(candidate)),
+// Per-instance defaults derived from the config file's own name (e.g.
+// dut3.json -> dut3.token / dut3.sock / dut3.pid), so several Client
+// instances on one host don't collide on a shared default path — each
+// still overridable explicitly for non-standard layouts.
+function instanceName(configFile){
+  return path.basename(configFile, path.extname(configFile));
+}
+
+function loadConfig(configPath = process.env.THUB_CLIENT_CONFIG, overrides = {}){
+  const candidate = findConfigFile(configPath),
+    raw = JSON.parse(fs.readFileSync(candidate, 'utf8')) || {},
+    instance = instanceName(candidate),
 
     // Default to a directory under the current working directory — always
     // writable, on every platform, with zero setup — rather than an FHS
@@ -76,6 +84,8 @@ function loadConfig(configPath = process.env.THUB_CLIENT_CONFIG, overrides = {})
     config = {
       coordinatorUrl: raw.coordinatorUrl,
       name: overrides.name || raw.name || instance,
+      // Names this instance's udev rule file (udev.js, 99-thub-<instance>.rules).
+      instance,
       type: raw.type,
       labels: raw.labels || [],
       // Which resource group(s) this Client belongs to (README §13.1) — a
@@ -130,6 +140,16 @@ function loadConfig(configPath = process.env.THUB_CLIENT_CONFIG, overrides = {})
   return config;
 }
 
+// Just what udev.js needs, with none of loadConfig's side effects (it
+// creates the .client-id file) — the udev sync runs as root from the
+// systemd unit's ExecStartPre=+, before the daemon runs as its own user,
+// and must not leave root-owned files in that user's state directory.
+function loadDeviceConfig(configPath = process.env.THUB_CLIENT_CONFIG){
+  const candidate = findConfigFile(configPath),
+    raw = JSON.parse(fs.readFileSync(candidate, 'utf8')) || {};
+  return { instance: instanceName(candidate), type: raw.type, hw: resolveHwConfig(raw.hw || {}) };
+}
+
 function readOrCreateClientId(clientIdFile){
   try {
     const id = fs.readFileSync(clientIdFile, 'utf8').trim();
@@ -152,7 +172,7 @@ function assertSlotIndex(field, index){
   }
 }
 
-// udev/99-thub.rules names devices 1-based (dut1..dut8), unlike relay
+// udev symlinks are named 1-based (dut1..dut8), unlike relay
 // channels, which are the relay board's own 0-7 numbering.
 function assertDeviceIndex(field, index){
   if (!Number.isInteger(index) || index < 1 || index > MAX_SLOTS){
@@ -160,7 +180,7 @@ function assertDeviceIndex(field, index){
   }
 }
 
-// Symlink format from udev/99-thub.rules: /dev/thub/dut<N>-uart|usb|stlink.
+// Symlink format (udev.js): /dev/thub/dut<N>-uart|usb|stlink.
 function devicePath(index, kind){
   return `/dev/thub/dut${index}-${kind}`;
 }
@@ -177,7 +197,9 @@ function assertListSize(field, list){
 // Each entry is a udev index (number), an explicit path (string), or an
 // object with `index` or `path` (an explicit path always wins). ST-Link
 // entries may instead give the probe's `serial` directly, skipping the
-// udev lookup hw.js otherwise does to find it from the path.
+// udev lookup hw.js otherwise does to find it from the path. An object
+// with `devpath` (plus optional vendorId/productId/subsystem) also gets a
+// udev rule creating its `path` symlink on Client start (udev.js).
 function resolveDeviceList(field, list, kind){
   assertListSize(field, list);
   return list.map((entry, i) => {
@@ -185,7 +207,7 @@ function resolveDeviceList(field, list, kind){
     if (!item || typeof item !== 'object'){
       throw new Error(`${field}[${i}] must be an index, a path or an object`);
     }
-    if (item.path || (kind === 'stlink' && item.serial)){
+    if (item.path || (kind === 'stlink' && item.serial && item.index === undefined)){
       return item;
     }
     assertDeviceIndex(`${field}[${i}].index`, item.index);
@@ -285,6 +307,7 @@ function writeCredentials(tokenFile, { resourceId, resourceToken }){
 
 module.exports = {
   loadConfig,
+  loadDeviceConfig,
   saveConfigField,
   readCredentials,
   writeCredentials,

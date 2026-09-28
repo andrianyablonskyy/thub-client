@@ -22,6 +22,7 @@ const fs = require('node:fs'),
   { createControlSocketServer } = require('./control-socket'),
   { JobRunner } = require('./runner'),
   { describeCapabilities } = require('./capabilities'),
+  { syncUdevRules } = require('./udev'),
   { PACKAGES, isNewer } = require('@andrian.yablonskyy/thub-common'),
   { version } = require('../package.json');
 
@@ -69,6 +70,7 @@ class Daemon{
   // send SIGTERM and wait for the process to exit, so this has to be a
   // real, awaited shutdown rather than a fire-and-forget flag flip.
   async start(){
+    this._syncUdevRules();
     await this._ensureRegistered();
     this._writePidFile();
     this._startControlSocket();
@@ -76,6 +78,22 @@ class Daemon{
     await this._workLoop();
     clearInterval(this.heartbeatTimer);
     this._cleanup();
+  }
+
+  // Under systemd the unit's ExecStartPre=+ has already done this as root
+  // (so this finds it unchanged); run by hand as root, this is what does
+  // it. Before registering, so capabilities see the fresh symlinks. Never
+  // fatal: a wrong rule just shows up as missing devices on the dashboard.
+  _syncUdevRules(){
+    try {
+      const { status, file } = syncUdevRules(this.config);
+      if (status === 'needs-root'){
+        console.warn(`udev: ${file} does not match this config; apply it with: sudo thub-client --config ${this.config.configPath} udev`);
+      }
+    }
+    catch (err){
+      console.warn(`udev: ${err.message}`);
+    }
   }
 
   _writePidFile(){

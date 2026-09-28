@@ -17,9 +17,9 @@ const { spawn } = require('node:child_process'),
   { RelayClient } = require('../relay-client');
 
 // §8.2 HW executor: flashes a physical DUT over ST-Link and exposes its
-// UARTs/USB devices. Stable device paths come from udev rules
-// (udev/99-thub.rules, /dev/thub/dut<N>-uart|usb|stlink), so a replug doesn't
-// change the config. config.js has already resolved every hw.* list.
+// UARTs/USB devices. Stable device paths come from the udev rules the Client
+// generates from its own hw.* config on start (udev.js,
+// /dev/thub/dut<N>-uart|usb|stlink), so a replug doesn't change the config. config.js has already resolved every hw.* list.
 function run(cmd, args){
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'] });
