@@ -31,6 +31,7 @@ function describeCapabilities(config){
         image: sw.image || null,
         registry: sw.registry || null,
         allowDockerHub: Boolean(sw.allowDockerHub),
+        allowJobImages: Boolean(sw.allowJobImages),
         cpus: sw.cpus || 2,
         memory: sw.memory || '2g'
       }
