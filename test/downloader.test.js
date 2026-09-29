@@ -28,8 +28,9 @@ const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'thub-dl-')),
 
 // Serves `root` over plain HTTP — archives, and a bare git repo via git's
 // "dumb" HTTP protocol (after `git update-server-info`).
-async function serve(root){
+async function serve(root, seen = []){
   const server = http.createServer((req, res) => {
+    seen.push(req.headers);
     const file = path.join(root, decodeURIComponent(new URL(req.url, 'http://x').pathname));
     if (!file.startsWith(root) || !fs.existsSync(file) || fs.statSync(file).isDirectory()){
       res.writeHead(404).end();
@@ -111,6 +112,28 @@ test('git repo: ref as branch, tag, full or short commit, or the default branch;
   assert.equal(git(full.workDir, 'rev-list', '--count', 'HEAD'), '2');
   await assert.rejects(at({ ref: 'nope' }), /can't get ref nope/);
   await assert.rejects(prepareTask({ git: { url: 'https://other.example/r.git' } }, tmp(), cfg), /isn't an allowed download source/);
+});
+
+test('--git-options go between git and its subcommand on every call', async (t) => {
+  const work = tmp(),
+    root = tmp(),
+    seen = [];
+  git(work, 'init', '-q', '-b', 'main');
+  fs.writeFileSync(path.join(work, 'f.txt'), 'x');
+  git(work, 'add', '.');
+  git(work, '-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'c1');
+  execFileSync('git', ['clone', '-q', '--bare', work, path.join(root, 'repo.git')]);
+  git(path.join(root, 'repo.git'), 'update-server-info');
+  const { base, close } = await serve(root, seen);
+  t.after(close);
+  const task = await prepareTask(
+    { git: { url: `${base}/repo.git`, options: '-c "http.extraHeader=X-Thub-Test: yes, it works"' } },
+    tmp(),
+    { sources: { allowedPrefixes: [base] } }
+  );
+  assert.ok(fs.existsSync(path.join(task.workDir, 'f.txt')));
+  assert.ok(seen.length > 0);
+  assert.ok(seen.every((h) => h['x-thub-test'] === 'yes, it works'), JSON.stringify(seen.map((h) => h['x-thub-test'])));
 });
 
 test('the command runs in the work dir via sh -c, with --arg values as "$@" and the job env', async () => {
