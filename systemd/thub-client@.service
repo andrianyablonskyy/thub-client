@@ -21,6 +21,9 @@ User=thub
 Group=thub
 SupplementaryGroups=dialout plugdev docker
 Environment=THUB_CLIENT_CONFIG=/home/thub/.config/thub/%i.json
+# What a job's command finds: the usual directories plus /snap/bin (Docker
+# from snap), this install's node first. systemd's own default has no /snap/bin.
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin
 WorkingDirectory=/home/thub/var/lib/thub/client
 ExecStartPre=+/usr/bin/node /usr/lib/node_modules/@andrian.yablonskyy/thub-client/src/udev.js --config /home/thub/.config/thub/%i.json
 ExecStart=/usr/bin/node /usr/lib/node_modules/@andrian.yablonskyy/thub-client/src/daemon.js --config /home/thub/.config/thub/%i.json
