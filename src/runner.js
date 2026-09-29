@@ -17,7 +17,7 @@ const fs = require('node:fs'),
   path = require('node:path'),
   { spawn } = require('node:child_process'),
   { JOB_STATES } = require('@andrian.yablonskyy/thub-common'),
-  { prepareTask } = require('./downloader'),
+  { prepareTask, planTask, shellQuote, shellJoin } = require('./downloader'),
   { LogShipper } = require('./log-shipper'),
   { HwExecutor } = require('./executors/hw'),
   { SwExecutor } = require('./executors/sw');
@@ -172,9 +172,12 @@ class JobRunner{
   // job — accept, PREPARING/RUNNING transitions, log lines, an artifact,
   // a result — but never downloads or clones anything, never touches an
   // executor (no Docker, no ST-Link/serial), and never runs the command.
-  // Useful for proving the Coordinator<->Client plumbing end-to-end
-  // without needing real hardware, a real emulator image, or a real
-  // Artifactory.
+  // Instead it logs every command the real job would run on this Client,
+  // in full (git with its --git-options, the executor's, the job's own with
+  // its working directory and environment), plus what this Client's config
+  // would refuse. Useful for proving the Coordinator<->Client plumbing
+  // end-to-end, and checking a job, without real hardware, a real emulator
+  // image, or a real Artifactory.
   async _runDryRun(job, jobDir, logShipper){
     try {
       await this.client.post(`/jobs/${job.id}/accept`);
@@ -182,23 +185,9 @@ class JobRunner{
         return this._reportStoppedIfNeeded(job.id);
       }
 
-      logShipper.push('runner', '[dry-run] no commands will be executed on this Client');
-      logShipper.push(
-        'runner',
-        `[dry-run] target: ${job.spec.target.type} labels=${(job.spec.target.labels || []).join(',') || '(none)'}`
-      );
-      for (const d of job.spec.downloads || []){
-        logShipper.push('runner', `[dry-run] would download ${d.url}`);
-      }
-      if (job.spec.git){
-        logShipper.push('runner', `[dry-run] would clone ${describeGit(job.spec.git)}`);
-      }
-      if (job.spec.image){
-        logShipper.push('runner', `[dry-run] would run Docker image ${job.spec.image} as the DUT`);
-      }
-      logShipper.push('runner', `[dry-run] would run: ${describeCommand(job.spec)}`);
-      for (const [key, value]of Object.entries(metaToEnv(job.spec.meta))){
-        logShipper.push('runner', `[dry-run] ${key}=${value}`);
+      const plan = dryRunPlan(job, jobDir, this.config);
+      for (const line of plan){
+        logShipper.push('runner', `[dry-run] ${line}`);
       }
       if (this.canceled){
         return this._reportStoppedIfNeeded(job.id);
@@ -214,7 +203,7 @@ class JobRunner{
 
       logShipper.push('runner', '[dry-run] done — no real verdict; reporting PASSED');
       const reportPath = path.join(jobDir, 'dry-run-report.txt');
-      fs.writeFileSync(reportPath, dryRunReport(job));
+      fs.writeFileSync(reportPath, dryRunReport(job, plan));
       await this.client.postArtifacts(job.id, [reportPath]);
 
       await this.client.post(`/jobs/${job.id}/result`, {
@@ -247,20 +236,10 @@ class JobRunner{
   // checkout's commit, the suite and --meta values.
   _runCommand(job, task, executor, logShipper){
     return new Promise((resolve, reject) => {
-      const { command, suite = 'default', args = [] } = job.spec;
       logShipper.push('runner', `running: ${describeCommand(job.spec)}`);
-      this.child = spawn('sh', ['-c', command, 'thub-job', ...args], {
+      this.child = spawn('sh', commandArgs(job.spec), {
         cwd: task.workDir,
-        env: {
-          ...process.env,
-          ...executor.envFor(),
-          ...metaToEnv(job.spec.meta),
-          ...downloadsEnv(task),
-          THUB_JOB_ID: job.id,
-          THUB_SUITE: suite,
-          THUB_WORK_DIR: task.workDir,
-          ...(task.commit ? { THUB_GIT_COMMIT: task.commit } : {})
-        }
+        env: { ...process.env, ...jobEnv(job, task, executor.envFor()) }
       });
       this.child.stdout.on('data', (d) => logShipper.push('runner', d.toString('utf8').trimEnd()));
       this.child.stderr.on('data', (d) => logShipper.push('runner', d.toString('utf8').trimEnd()));
@@ -271,6 +250,49 @@ class JobRunner{
       });
     });
   }
+}
+
+// `sh -c <command> thub-job <args...>`: the job's --command, with its --arg
+// values as "$@".
+function commandArgs(spec){
+  return ['-c', spec.command, 'thub-job', ...(spec.args || [])];
+}
+
+// What the job's command gets on top of the Client's own environment.
+function jobEnv(job, task, executorEnv){
+  return {
+    ...executorEnv,
+    ...metaToEnv(job.spec.meta),
+    ...downloadsEnv(task),
+    THUB_JOB_ID: job.id,
+    THUB_SUITE: job.spec.suite || 'default',
+    THUB_WORK_DIR: task.workDir,
+    ...(task.git || task.commit ? { THUB_GIT_COMMIT: task.commit || '<checked-out commit>' } : {})
+  };
+}
+
+// The dry run's log: every step the real job would take on this Client, in
+// order, with full commands.
+function dryRunPlan(job, jobDir, config){
+  const { spec } = job,
+    executor = spec.target.type === 'hw' ? new HwExecutor(config, null) : new SwExecutor(config, null),
+    { task, steps: inputs, problems } = planTask(spec, jobDir, config),
+    dut = executor.plan(job, task.downloads.length ? task.downloadsDir : null),
+    env = jobEnv(job, { ...task, git: Boolean(spec.git) }, dut.env),
+    section = (title, lines) => (lines.length ? [`${title}:`, ...lines.map((l) => `  ${l}`)] : []);
+  return [
+    'nothing below is executed on this Client — these are the commands the real job would run',
+    `target: ${spec.target.type} labels=${(spec.target.labels || []).join(',') || '(none)'}`,
+    ...section('task inputs', inputs),
+    ...section(spec.target.type === 'hw' ? 'DUT (HW executor)' : 'DUT (SW executor, docker CLI equivalent)', dut.steps),
+    ...section('command', [
+      `cd ${shellQuote(task.workDir)}`,
+      ...Object.entries(env).map(([k, v]) => `export ${k}=${shellQuote(v)}`),
+      shellJoin(['sh', ...commandArgs(spec)])
+    ]),
+    ...section('then, whatever the result', dut.teardown),
+    ...[...problems, ...(dut.problems || [])].map((p) => `WOULD FAIL: ${p}`)
+  ];
 }
 
 function describeGit(git){
@@ -349,7 +371,7 @@ function summarizeJUnit(xmlFiles){
   return { total, passed: Math.max(total - failed - skipped, 0), failed, skipped };
 }
 
-function dryRunReport(job){
+function dryRunReport(job, plan){
   return (
     'TestHub dry run — no commands were executed on this Client.\n\n' +
     `job:      ${job.id}\n` +
@@ -359,7 +381,8 @@ function dryRunReport(job){
     `git:      ${job.spec.git ? describeGit(job.spec.git) : '(none)'}\n` +
     `image:    ${job.spec.image || '(Client default)'}\n` +
     `command:  ${describeCommand(job.spec)} (suite=${job.spec.suite || 'default'})\n` +
-    `meta:     ${JSON.stringify(job.spec.meta || {})}\n`
+    `meta:     ${JSON.stringify(job.spec.meta || {})}\n\n` +
+    `${plan.join('\n')}\n`
   );
 }
 
@@ -367,4 +390,4 @@ function sleep(ms){
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-module.exports = { JobRunner };
+module.exports = { JobRunner, dryRunPlan };

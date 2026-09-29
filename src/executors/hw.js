@@ -62,6 +62,35 @@ class HwExecutor{
     await this._openUarts();
   }
 
+  // What prepare()/teardown() would run, without running it (a dry run):
+  // { steps, teardown, env } — env with the ST-Link serials still unknown.
+  plan(){
+    const cfg = this.config,
+      steps = [
+        ...(cfg.stlinks || []).filter((s) => !s.serial)
+          .map((s) => `udevadm info --query=property --name=${s.path}   # ST-Link serial (ID_SERIAL_SHORT)`),
+        ...(cfg.uarts || []).map((u) => `capture UART ${u.path} at ${u.baudRate || 115200} baud (uart log stream)`)
+      ],
+      teardown = [];
+    if (cfg.power?.method === 'uhubctl' && cfg.power.hub){
+      teardown.push(`uhubctl -l ${cfg.power.hub} -p ${cfg.power.port} -a cycle`);
+    }
+    else if (cfg.power?.method === 'relay'){
+      teardown.push(...(cfg.relays || []).map((r) => `relay ${r.baseUrl || '(default URL)'}: channel ${r.channel} off, 500 ms, on`));
+    }
+    const env = this.envFor();
+    for (const [i, s]of (cfg.stlinks || []).entries()){
+      if (!s.serial){
+        const unknown = `<serial of ${s.path}>`;
+        env[`THUB_DUT_STLINK_${i + 1}`] = unknown;
+        if (i === 0){
+          env.THUB_DUT_STLINK = unknown;
+        }
+      }
+    }
+    return { steps, teardown, env };
+  }
+
   async _stlinkSerial(stlink){
     if (!stlink.serial){
       stlink.serial = await stlinkSerialFromPath(stlink.path);
