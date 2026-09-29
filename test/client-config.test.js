@@ -106,3 +106,48 @@ test('a dashboard revision that still carries power control is applied without i
   applyEditableConfig(file, 'hw', { usbs: [{ index: 1 }], relays: [], power: { method: 'uhubctl', hub: '1-1', port: 2 } });
   assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8'))['hw-devices'], { usbs: [{ index: 1 }] });
 });
+
+test('a dashboard apply pins the running identity: the restart comes back with the same Coordinator, name, type and join key', () => {
+  // The file says one name; the Client runs as another (started with --name).
+  const file = configFile({ name: 'from-file', type: 'hw', 'hw-devices': { usbs: [] } }),
+    running = loadConfig(file, { name: 'lab-hw-07' }),
+    { Daemon } = require('../src/daemon'),
+    identity = (env) => {
+      const saved = process.env.THUB_CLIENT_JOIN_KEY;
+      if (env === undefined){
+        delete process.env.THUB_CLIENT_JOIN_KEY;
+      }
+      else {
+        process.env.THUB_CLIENT_JOIN_KEY = env;
+      }
+      try {
+        return Daemon.prototype._identity.call({ config: running });
+      }
+      finally {
+        if (saved === undefined){
+          delete process.env.THUB_CLIENT_JOIN_KEY;
+        }
+        else {
+          process.env.THUB_CLIENT_JOIN_KEY = saved;
+        }
+      }
+    };
+  assert.deepEqual(identity(), { coordinatorUrl: 'http://x', name: 'lab-hw-07', type: 'hw', joinKey: 'k' });
+  assert.equal(identity('from-env').joinKey, undefined); // stays in the environment
+
+  // An import can't change them, and the apply writes the running ones.
+  applyEditableConfig(file, 'hw', { usbs: [{ index: 1 }] }, { name: 'dut0', coordinatorUrl: 'https://evil', joinKey: 'x', labels: ['a'] }, identity());
+  const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.deepEqual([raw.coordinatorUrl, raw.name, raw.type, raw.joinKey, raw.labels], ['http://x', 'lab-hw-07', 'hw', 'k', ['a']]);
+  // A restart the way the systemd unit starts it (no --name) keeps that name.
+  const restarted = loadConfig(file);
+  assert.deepEqual([restarted.coordinatorUrl, restarted.name, restarted.type, restarted.joinKey], ['http://x', 'lab-hw-07', 'hw', 'k']);
+});
+
+test('the systemd unit starts the daemon with --config only — no --name overriding the file', () => {
+  const unit = fs.readFileSync(path.join(__dirname, '..', 'systemd', 'thub-client@.service'), 'utf8'),
+    installer = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'install-systemd-unit.js'), 'utf8');
+  assert.match(unit, /^ExecStart=.*daemon\.js --config \S+\/%i\.json$/m);
+  assert.doesNotMatch(unit, /^ExecStart=.*--name/m);
+  assert.match(installer, /ExecStart=\$\{process\.execPath\} \$\{DAEMON_PATH\} --config \$\{paths\.configDir\}\/%i\.json/);
+});

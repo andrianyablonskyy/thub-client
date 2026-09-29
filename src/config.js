@@ -39,10 +39,9 @@ const USER_CONFIG_PATH = path.join(os.homedir(), '.config', 'thub', 'client.json
   MAX_SLOTS = 8;
 
 // Matches README.md §13 (~/.config/thub/client.json). `overrides.name` (the
-// daemon's --name, which the systemd unit sets to its instance name) wins
-// over the file's `name`, which in turn defaults to the config file's
-// basename — the same thing as the systemd instance name, so the control
-// CLI (which never gets --name) loads a name-less config fine too.
+// daemon's --name, when started by hand with one) wins over the file's
+// `name`, which in turn defaults to the config file's basename — the
+// systemd instance name, as the unit passes only --config.
 function findConfigFile(configPath){
   const candidate = [configPath, USER_CONFIG_PATH, PACKAGE_DEFAULT_CONFIG_PATH].find(
     (p) => p && fs.existsSync(p)
@@ -276,14 +275,18 @@ function readShareableConfigFile(configPath){
   return shareableClientConfigFile(JSON.parse(fs.readFileSync(configPath, 'utf8')) || {});
 }
 
+const pick = (obj, keys) => Object.fromEntries(keys.filter((k) => obj[k] !== undefined && obj[k] !== '').map((k) => [k, obj[k]]));
+
 // Applies a dashboard edit to the config file: validated (the shared schema,
 // then exactly as loadConfig would resolve it), legacy single-device fields
 // dropped, and written atomically — an HW Client's devices under
 // `hw-devices`, older `hw` / `sw` sections removed. Throws with a
 // readable reason if it can't be applied. `fields`: an Import's other
 // top-level fields — filtered here again (never joinKey, coordinatorUrl,
-// name, this Client's id or paths).
-function applyEditableConfig(configPath, type, section, fields = null){
+// name, this Client's id or paths). `identity`: { coordinatorUrl, name,
+// type, joinKey? } the running Client uses, written into the file as they
+// are, so a restart comes back with the same ones.
+function applyEditableConfig(configPath, type, section, fields = null, identity = null){
   // A revision saved before power control was removed may still carry it.
   section = type === 'hw' ? withoutPowerControl(section).section : section;
   const { valid, errors } = validateClientConfig(type, section);
@@ -303,7 +306,8 @@ function applyEditableConfig(configPath, type, section, fields = null){
   }
   // hw-devices replaces an older `hw` section; `sw` is gone.
   const { hw: _hw, sw: _sw, ...rest } = raw,
-    next = type === 'hw' ? { ...rest, [HW_DEVICES_SECTION]: section } : rest,
+    pinned = { ...rest, ...(identity ? pick(identity, ['coordinatorUrl', 'name', 'type', 'joinKey']) : {}) },
+    next = type === 'hw' ? { ...pinned, [HW_DEVICES_SECTION]: section } : pinned,
     mode = fs.statSync(configPath).mode & 0o777,
     tmp = `${configPath}.tmp-${process.pid}`;
   fs.writeFileSync(tmp, JSON.stringify(next, null, 2) + '\n', { mode });

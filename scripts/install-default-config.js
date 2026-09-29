@@ -26,8 +26,8 @@ const fs = require('node:fs'),
 // empty required fields so config.js's own validation fails loudly until
 // you set coordinatorUrl/joinKey for real, rather than silently
 // registering as an instance nobody meant to create with a shared
-// placeholder joinKey. No `name`: the systemd unit passes its instance name
-// (thub-client@<name>) as --name. varDir is home-anchored, not cwd-relative (config.js
+// placeholder joinKey. No `name`: the Client then registers under its
+// instance name (thub-client@<name> reads <name>.json). varDir is home-anchored, not cwd-relative (config.js
 // defaults it to <cwd>/.data), so the daemon, the control CLI and the
 // systemd unit all agree on where tokens, sockets and pidfiles live.
 function defaultContent(paths){
