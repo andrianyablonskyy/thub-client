@@ -18,7 +18,7 @@ const test = require('node:test'),
   fs = require('node:fs'),
   os = require('node:os'),
   path = require('node:path'),
-  { readEditableConfig, applyEditableConfig, loadConfig } = require('../src/config');
+  { readEditableConfig, readShareableConfigFile, applyEditableConfig, loadConfig } = require('../src/config');
 
 function configFile(content){
   const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'thub-cc-')), 'dut1.json');
@@ -57,4 +57,32 @@ test('an invalid edit is refused and the file left as it was', () => {
     before = fs.readFileSync(file, 'utf8');
   assert.throws(() => applyEditableConfig(file, 'hw', { uarts: [{ path: '/tmp/nope' }] }), /hw\.uarts\.0\.path/);
   assert.equal(fs.readFileSync(file, 'utf8'), before);
+});
+
+test('import: the file\'s other fields written too; this Client keeps its URL, name, join key, id, paths and secrets', () => {
+  const file = configFile({
+    name: 'dut1', type: 'sw', clientId: 'c-1', labels: [], tokenFile: '/var/lib/thub/dut1.token',
+    artifactory: { token: 'secret', tokenFile: '/etc/thub/a.token', allowedArtifactPrefixes: [] },
+    sw: { image: 'emu:1', registryAuth: { password: 'x' } }
+  });
+  assert.deepEqual(readShareableConfigFile(file).artifactory, { tokenFile: '/etc/thub/a.token', allowedArtifactPrefixes: [] });
+  assert.equal(readShareableConfigFile(file).sw.registryAuth, undefined);
+
+  applyEditableConfig(file, 'sw', { image: 'emu:2' }, {
+    labels: ['board:b'], heartbeatIntervalSec: 5, sources: { allowedPrefixes: ['*'] },
+    artifactory: { allowedArtifactPrefixes: ['https://art/'] },
+    // Filtered out by the Coordinator already; ignored here again regardless.
+    joinKey: 'other', coordinatorUrl: 'https://evil', name: 'dut9', clientId: 'c-9', tokenFile: '/tmp/x'
+  });
+  const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.deepEqual(
+    [raw.coordinatorUrl, raw.joinKey, raw.name, raw.clientId, raw.tokenFile],
+    ['http://x', 'k', 'dut1', 'c-1', '/var/lib/thub/dut1.token']
+  );
+  assert.deepEqual([raw.labels, raw.heartbeatIntervalSec, raw.sources], [['board:b'], 5, { allowedPrefixes: ['*'] }]);
+  assert.deepEqual(raw.artifactory, { allowedArtifactPrefixes: ['https://art/'], token: 'secret', tokenFile: '/etc/thub/a.token' });
+  assert.deepEqual(raw.sw, { image: 'emu:2', registryAuth: { password: 'x' } });
+
+  assert.throws(() => applyEditableConfig(file, 'sw', { image: 'emu:3' }, { labels: 'x' }), /labels must be array/);
+  assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).sw.image, 'emu:2'); // refused: nothing written
 });

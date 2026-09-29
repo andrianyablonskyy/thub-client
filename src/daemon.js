@@ -18,7 +18,7 @@
 const fs = require('node:fs'),
   os = require('node:os'),
   {
-    loadConfig, readCredentials, writeCredentials, readEditableConfig, applyEditableConfig, readAppliedConfigRevision,
+    loadConfig, readCredentials, writeCredentials, readEditableConfig, readShareableConfigFile, applyEditableConfig, readAppliedConfigRevision,
     writeAppliedConfigRevision
   } = require('./config'),
   { ClientApiClient } = require('./api-client'),
@@ -154,8 +154,10 @@ class Daemon{
             timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone
           },
           capabilities: { ...describeCapabilities(this.config), rebootSupported: RebootScheduler.supported() },
-          // Editable from the dashboard's Config tab (secrets left out).
-          config: this._editableConfig()
+          // Editable from the dashboard's Config tab (secrets left out),
+          // and the whole file for its Export.
+          config: this._editableConfig(),
+          configFile: this._shareableConfigFile()
         });
       writeCredentials(this.config.tokenFile, { resourceId, resourceToken });
       this.resourceId = resourceId;
@@ -365,6 +367,16 @@ class Daemon{
     }
   }
 
+  _shareableConfigFile(){
+    try {
+      return this.config.configPath ? readShareableConfigFile(this.config.configPath) : null;
+    }
+    catch (err){
+      console.warn(`config: can't report the config file: ${err.message}`);
+      return null;
+    }
+  }
+
   _editableConfig(){
     try {
       return this.config.configPath ? readEditableConfig(this.config.configPath, this.config.type) : null;
@@ -380,7 +392,8 @@ class Daemon{
   // effect. Repeated by the Coordinator until the revision is reported, so
   // an older or already-applied one is ignored; a refused one is reported
   // (configError) rather than retried.
-  _applyConfig({ revision, type, config }){
+  // `file`: an Import's other top-level fields, written along with it.
+  _applyConfig({ revision, type, config, file }){
     if (!Number.isInteger(revision) || revision <= this.configState.revision){
       return;
     }
@@ -388,7 +401,7 @@ class Daemon{
       if (type !== this.config.type){
         throw new Error(`it's a ${type} config, but this is a ${this.config.type} Client`);
       }
-      applyEditableConfig(this.config.configPath, type, config);
+      applyEditableConfig(this.config.configPath, type, config, file || null);
       this.configState = { revision, error: null };
       this.restartForConfig = true;
       console.log(`config revision ${revision} from the Coordinator written to ${this.config.configPath}; restarting once idle`);
