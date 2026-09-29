@@ -120,9 +120,10 @@ const looksLikeCommit = (ref) => /^[0-9a-fA-F]{7,40}$/.test(ref || '');
 // short or unadvertised commit), falls back to a full fetch. Refs are
 // validated by the job spec (never an option-like "-..."), the transport is
 // restricted, and git never prompts.
-async function cloneRepo(git, destDir, cfg, { signal, log = () => {} } = {}){
+// `env`: the job's own (`--env`), under git's safety settings.
+async function cloneRepo(git, destDir, cfg, { signal, log = () => {}, env: jobEnv = {} } = {}){
   downloadAccess(git.url, cfg);
-  const env = { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_ALLOW_PROTOCOL },
+  const env = { ...process.env, ...jobEnv, GIT_TERMINAL_PROMPT: '0', GIT_ALLOW_PROTOCOL },
     steps = gitSteps(git, destDir),
     g = (args) => run('git', args, { signal, env });
 
@@ -190,7 +191,7 @@ function taskDirs(jobDir){
 // downloads, commit }.
 async function prepareTask(spec, jobDir, cfg, { signal, log } = {}){
   const { workDir, downloadsDir } = taskDirs(jobDir),
-    commit = spec.git ? await cloneRepo(spec.git, workDir, cfg, { signal, log }) : null;
+    commit = spec.git ? await cloneRepo(spec.git, workDir, cfg, { signal, log, env: spec.env }) : null;
   fs.mkdirSync(workDir, { recursive: true });
   const downloads = await downloadFiles(spec.downloads, downloadsDir, cfg, { signal, log });
   return { workDir, downloadsDir, downloads, commit };
