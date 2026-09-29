@@ -14,7 +14,9 @@
 'use strict';
 
 const fs = require('node:fs'),
-  { validateClientConfig, publicClientConfig, CLIENT_CONFIG_PRIVATE_FIELDS } = require('@andrian.yablonskyy/thub-common'),
+  {
+    validateClientConfig, publicClientConfig, shareableClientConfigFile, importClientConfigFile, CLIENT_CONFIG_PRIVATE_FIELDS
+  } = require('@andrian.yablonskyy/thub-common'),
   os = require('node:os'),
   path = require('node:path'),
   crypto = require('node:crypto');
@@ -341,18 +343,37 @@ function readEditableConfig(configPath, type){
   return publicClientConfig(type, section);
 }
 
+// The whole config file, its secrets left out — reported at registration
+// for the dashboard's Export.
+function readShareableConfigFile(configPath){
+  return shareableClientConfigFile(JSON.parse(fs.readFileSync(configPath, 'utf8')) || {});
+}
+
 // Applies a dashboard edit to the config file: validated (the shared schema,
 // then exactly as loadConfig would resolve it), merged with the section's
 // private fields (e.g. sw.registryAuth, never sent to the Coordinator),
 // legacy single-device fields dropped, and written atomically. Throws with a
-// readable reason if it can't be applied.
-function applyEditableConfig(configPath, type, section){
+// readable reason if it can't be applied. `fields`: an Import's other
+// top-level fields — filtered here again (never joinKey, coordinatorUrl,
+// name, this Client's id or paths), artifactory's token and tokenFile kept.
+function applyEditableConfig(configPath, type, section, fields = null){
   const { valid, errors } = validateClientConfig(type, section);
   if (!valid){
     throw new Error(errors.join('; '));
   }
-  const raw = JSON.parse(fs.readFileSync(configPath, 'utf8')) || {},
-    current = raw[type] || {},
+  let raw = JSON.parse(fs.readFileSync(configPath, 'utf8')) || {};
+  if (fields){
+    const checked = importClientConfigFile(type, fields);
+    if (!checked.valid){
+      throw new Error(checked.errors.join('; '));
+    }
+    const { token, tokenFile } = raw.artifactory || {};
+    raw = { ...raw, ...checked.fields };
+    if (checked.fields.artifactory){
+      raw.artifactory = { ...checked.fields.artifactory, ...(token ? { token } : {}), ...(tokenFile ? { tokenFile } : {}) };
+    }
+  }
+  const current = raw[type] || {},
     next = { ...section };
   for (const key of CLIENT_CONFIG_PRIVATE_FIELDS[type] || []){
     if (current[key] !== undefined){
@@ -410,6 +431,7 @@ function writeCredentials(tokenFile, { resourceId, resourceToken }){
 }
 
 module.exports = {
+  readShareableConfigFile,
   loadConfig,
   loadDeviceConfig,
   readEditableConfig,
