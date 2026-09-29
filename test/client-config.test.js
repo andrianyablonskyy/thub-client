@@ -151,3 +151,24 @@ test('the systemd unit starts the daemon with --config only — no --name overri
   assert.doesNotMatch(unit, /^ExecStart=.*--name/m);
   assert.match(installer, /ExecStart=\$\{process\.execPath\} \$\{DAEMON_PATH\} --config \$\{paths\.configDir\}\/%i\.json/);
 });
+
+test('capabilities say whether a job can use Docker here, and why not', () => {
+  const { describeCapabilities } = require('../src/capabilities'),
+    fail = (props) => () => {
+      throw Object.assign(new Error('docker failed'), props);
+    },
+    docker = (run) => describeCapabilities({ type: 'hw', hw: {} }, { run }).docker;
+  assert.deepEqual(docker(() => '27.1.1\n'), { available: true, version: '27.1.1' });
+  assert.match(docker(fail({ code: 'ENOENT' })).reason, /isn't installed, or not on the service's PATH/);
+  assert.match(docker(fail({ stderr: 'permission denied while trying to connect to the Docker daemon socket' })).reason, /docker group/);
+  assert.match(docker(fail({ stderr: 'Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?' })).reason,
+    /daemon isn't running/);
+  assert.equal(describeCapabilities({ type: 'sw' }, { run: () => '27' }).sw !== undefined, true);
+});
+
+test('the unit gives jobs a PATH with /snap/bin (systemd\'s default has none)', () => {
+  const unit = fs.readFileSync(path.join(__dirname, '..', 'systemd', 'thub-client@.service'), 'utf8'),
+    installer = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'install-systemd-unit.js'), 'utf8');
+  assert.match(unit, /^Environment=PATH=.*:\/usr\/bin:.*\/snap\/bin$/m);
+  assert.match(installer, /\.replace\(\/\^Environment=PATH=\.\*\$\/m, `Environment=PATH=\$\{JOB_PATH\}`\)/);
+});

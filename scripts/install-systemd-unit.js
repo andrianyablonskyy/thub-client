@@ -60,6 +60,11 @@ function groupExists(name){
 // User='s, so the path is written out) and wherever *this* install's node
 // and daemon.js actually are, so it works regardless of npm prefix or an
 // nvm-managed Node.
+// A job's command runs with the Client's PATH: this node's directory, the
+// usual system directories, and /snap/bin (snap-installed Docker).
+const JOB_PATH = [path.dirname(process.execPath), '/usr/local/sbin', '/usr/local/bin', '/usr/sbin', '/usr/bin', '/sbin', '/bin', '/snap/bin']
+  .filter((d, i, all) => all.indexOf(d) === i).join(':');
+
 function renderUnit(user, paths){
   const writable = [...new Set([paths.varDir, paths.runDir])].join(' '),
     groups = DEVICE_GROUPS.filter(groupExists).join(' ');
@@ -68,6 +73,7 @@ function renderUnit(user, paths){
     .replace(/^Group=.*$/m, `Group=${user.gid}`)
     .replace(/^SupplementaryGroups=.*$/m, groups ? `SupplementaryGroups=${groups}` : '')
     .replace(/^Environment=THUB_CLIENT_CONFIG=.*$/m, `Environment=THUB_CLIENT_CONFIG=${paths.configDir}/%i.json`)
+    .replace(/^Environment=PATH=.*$/m, `Environment=PATH=${JOB_PATH}`)
     .replace(/^WorkingDirectory=.*$/m, `WorkingDirectory=${paths.varDir}`)
     .replace(/^ExecStartPre=.*$/m, `ExecStartPre=+${process.execPath} ${UDEV_SYNC_PATH} --config ${paths.configDir}/%i.json`)
     .replace(/^ExecStart=.*$/m, `ExecStart=${process.execPath} ${DAEMON_PATH} --config ${paths.configDir}/%i.json`)

@@ -24,8 +24,10 @@ On a fresh install the service isn't started yet — the daemon would exit at on
 
 ```bash
 sudo apt install -y nodejs npm stlink-tools openocd
-# SW only: Docker — install it before thub-client so the service gets the
-# docker group (re-run the npm i -g below if you add it later)
+# Docker — SW Clients, and HW Clients whose jobs run docker in --command.
+# Install it before thub-client so the service gets the docker group
+# (re-run the npm i -g below if you add it later). The resource card's
+# Capabilities show whether a Client can use it, and why not.
 sudo apt install -y docker.io
 
 sudo npm i -g @andrian.yablonskyy/thub-client
