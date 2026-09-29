@@ -20,15 +20,17 @@ const test = require('node:test'),
   path = require('node:path'),
   { scanUsb } = require('../src/usb-scan');
 
-test('returns lsusb\'s output', async () => {
+test('runs lsusb -tvv and returns its output', async () => {
   const fake = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'thub-lsusb-')), 'lsusb');
-  fs.writeFileSync(fake, '#!/bin/sh\necho "Bus 001 Device 004: ID 0483:3748 STMicroelectronics ST-LINK/V2"\n', { mode: 0o755 });
-  assert.deepEqual(await scanUsb({ command: fake }), { output: 'Bus 001 Device 004: ID 0483:3748 STMicroelectronics ST-LINK/V2\n', error: null });
+  fs.writeFileSync(fake, '#!/bin/sh\necho "args: $*"\necho "/:  Bus 001.Port 001: Dev 001, Class=root_hub, Driver=xhci_hcd/12p, 480M"\n', { mode: 0o755 });
+  const { output, error } = await scanUsb({ command: fake });
+  assert.equal(error, null);
+  assert.match(output, /^args: -tvv\n\/: {2}Bus 001\.Port 001/);
 });
 
 test('reports a missing or failing lsusb instead of throwing', async () => {
   assert.match((await scanUsb({ command: '/nonexistent/lsusb' })).error, /isn't installed.*usbutils/);
   const failing = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'thub-lsusb-')), 'lsusb');
   fs.writeFileSync(failing, '#!/bin/sh\necho "no usb bus" >&2\nexit 1\n', { mode: 0o755 });
-  assert.match((await scanUsb({ command: failing })).error, /failed: no usb bus/);
+  assert.match((await scanUsb({ command: failing })).error, /lsusb -tvv failed: no usb bus/);
 });
