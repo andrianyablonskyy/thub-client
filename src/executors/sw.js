@@ -14,7 +14,8 @@
 'use strict';
 
 const net = require('node:net'),
-  Docker = require('dockerode');
+  Docker = require('dockerode'),
+  { shellJoin } = require('../downloader');
 
 // §8.3 SW executor: runs the DUT emulator in Docker, per job — isolated
 // network, read-only rootfs, resource limits, always removed (§12).
@@ -83,6 +84,45 @@ class SwExecutor{
         this.logShipper.push('emulator', `nothing listening on port 5555 in ${ref} — the command can use THUB_DUT_CONTAINER=${this.containerName}`);
       }
     }
+  }
+
+  // What prepare()/teardown() would do, as the equivalent docker CLI
+  // commands (the Client uses the Docker API), without doing it (a dry run):
+  // { steps, teardown, env, problems }.
+  plan(job, downloadsDir){
+    const jobImage = job.spec.image || null,
+      image = jobImage || this.config.image;
+    if (jobImage && !this.config.allowJobImages){
+      return { steps: [], teardown: [], env: {}, problems: [
+        `This Client doesn't run job-supplied Docker images (${jobImage}) — set sw.allowJobImages: true in its config`
+      ] };
+    }
+    if (!image){
+      return { steps: ['no Docker image (job or sw.image) — the command runs without a DUT container'], teardown: [], env: {}, problems: [] };
+    }
+    const sources = imageSources(image, this.config),
+      container = `thub-${job.id}`,
+      network = `thub-job-${job.id}`,
+      ref = sources[0]?.ref || image,
+      cmd = !jobImage && Array.isArray(this.config.cmd) ? this.config.cmd.map(String) : [];
+    return {
+      steps: [
+        ...(sources.length
+          ? sources.map(({ label, ref: r }, i) => `${i ? 'else ' : ''}docker pull ${r}   # ${label}, unless already cached`)
+          : []),
+        `docker network create --driver bridge ${network}`,
+        shellJoin([
+          'docker', 'run', '-d', '--name', container, '--network', network,
+          '--memory', this.config.memory || '2g', '--cpus', String(this.config.cpus || 2), '--read-only',
+          ...(downloadsDir ? ['-v', `${downloadsDir}:/downloads:ro`] : []),
+          '-p', '127.0.0.1::5555', ref, ...cmd
+        ]),
+        'wait up to 10 s for 127.0.0.1:<host port> (container port 5555)'
+      ],
+      teardown: [`docker stop -t 5 ${container}`, `docker rm -f ${container}`, `docker network rm ${network}`],
+      env: { THUB_DUT_HOST: '127.0.0.1:<host port>', THUB_DUT_CONTAINER: container },
+      problems: sources.length ? [] : ['No image source for sw.image: set sw.registry (local registry) and/or sw.allowDockerHub: true']
+    };
   }
 
   // Finds `sw.image` in order (README §8.3): the local registry

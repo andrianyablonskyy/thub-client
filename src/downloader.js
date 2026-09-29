@@ -123,55 +123,123 @@ const looksLikeCommit = (ref) => /^[0-9a-fA-F]{7,40}$/.test(ref || '');
 async function cloneRepo(git, destDir, cfg, { signal, log = () => {} } = {}){
   downloadAccess(git.url, cfg);
   const env = { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_ALLOW_PROTOCOL },
-    // --git-options: between `git` and the rest, on every call. Never logged
-    // (they may reference credentials).
-    extra = git.options ? splitArgs(git.options) : [],
-    g = (...args) => run('git', [...extra, '-C', destDir, ...args], { signal, env }),
-    ref = git.ref || null,
-    fetchRef = ref || 'HEAD',
-    depth = Number.isInteger(git.depth) ? git.depth : 1,
-    label = ref ? `ref ${ref}` : 'default branch';
+    steps = gitSteps(git, destDir),
+    g = (args) => run('git', args, { signal, env });
 
   fs.mkdirSync(destDir, { recursive: true });
-  await g('init', '-q');
-  await g('remote', 'add', 'origin', git.url);
-  log(`cloning ${git.url} (${label}${depth ? `, depth ${depth}` : ', full history'})`);
+  for (const args of steps.setup){
+    await g(args);
+  }
+  log(`cloning ${git.url} (${steps.label}${steps.depth ? `, depth ${steps.depth}` : ', full history'})`);
   try {
-    await g('fetch', '-q', ...(depth ? ['--depth', String(depth)] : []), 'origin', fetchRef);
-    await g('checkout', '-q', '--detach', 'FETCH_HEAD');
+    for (const args of steps.fetch){
+      await g(args);
+    }
   }
   catch (err){
-    log(`fetching ${label} that way failed (${err.message}) — fetching the full history`);
+    log(`fetching ${steps.label} that way failed (${err.message}) — fetching the full history`);
     try {
-      if (looksLikeCommit(ref)){
-        await g('fetch', '-q', '--tags', 'origin', '+refs/heads/*:refs/remotes/origin/*');
-        await g('checkout', '-q', '--detach', ref);
-      }
-      else {
-        await g('fetch', '-q', 'origin', fetchRef);
-        await g('checkout', '-q', '--detach', 'FETCH_HEAD');
+      for (const args of steps.fallback){
+        await g(args);
       }
     }
     catch (e){
-      throw new Error(`git: can't get ${label} from ${git.url}: ${e.message}`);
+      throw new Error(`git: can't get ${steps.label} from ${git.url}: ${e.message}`);
     }
   }
-  const commit = await g('rev-parse', 'HEAD');
+  const commit = await g(steps.revParse);
   log(`checked out commit ${commit}`);
   return commit;
 }
 
-// A task's inputs, before its command runs: `<jobDir>/work` — the git
-// checkout, or an empty directory — is where the command runs; the
+// The git argument lists cloneRepo runs, in order: `setup`, then `fetch`
+// (shallow, at the ref), or `fallback` (full history) if that fails, then
+// `revParse`. --git-options go between `git` and the rest, on every call;
+// cloneRepo never logs them (they may reference credentials) — only a dry
+// run shows them.
+function gitSteps(git, destDir){
+  const extra = git.options ? splitArgs(git.options) : [],
+    g = (...args) => [...extra, '-C', destDir, ...args],
+    ref = git.ref || null,
+    fetchRef = ref || 'HEAD',
+    depth = Number.isInteger(git.depth) ? git.depth : 1;
+  return {
+    label: ref ? `ref ${ref}` : 'default branch',
+    depth,
+    setup: [g('init', '-q'), g('remote', 'add', 'origin', git.url)],
+    fetch: [
+      g('fetch', '-q', ...(depth ? ['--depth', String(depth)] : []), 'origin', fetchRef),
+      g('checkout', '-q', '--detach', 'FETCH_HEAD')
+    ],
+    fallback: looksLikeCommit(ref)
+      ? [g('fetch', '-q', '--tags', 'origin', '+refs/heads/*:refs/remotes/origin/*'), g('checkout', '-q', '--detach', ref)]
+      : [g('fetch', '-q', 'origin', fetchRef), g('checkout', '-q', '--detach', 'FETCH_HEAD')],
+    revParse: g('rev-parse', 'HEAD')
+  };
+}
+
+// Where a task's inputs go under its job directory: `<jobDir>/work` — the
+// git checkout, or an empty directory — is where the command runs; the
 // downloads go to `<jobDir>/downloads`, apart from the checkout so they
-// can't clobber its files. Returns { workDir, downloadsDir, downloads, commit }.
+// can't clobber its files.
+function taskDirs(jobDir){
+  return { workDir: path.join(jobDir, 'work'), downloadsDir: path.join(jobDir, 'downloads') };
+}
+
+// A task's inputs, before its command runs. Returns { workDir, downloadsDir,
+// downloads, commit }.
 async function prepareTask(spec, jobDir, cfg, { signal, log } = {}){
-  const workDir = path.join(jobDir, 'work'),
-    downloadsDir = path.join(jobDir, 'downloads'),
+  const { workDir, downloadsDir } = taskDirs(jobDir),
     commit = spec.git ? await cloneRepo(spec.git, workDir, cfg, { signal, log }) : null;
   fs.mkdirSync(workDir, { recursive: true });
   const downloads = await downloadFiles(spec.downloads, downloadsDir, cfg, { signal, log });
   return { workDir, downloadsDir, downloads, commit };
 }
 
-module.exports = { prepareTask, downloadFiles, cloneRepo, downloadNames, downloadAccess };
+// What prepareTask would do, without doing it (a dry run): the task it would
+// return (commit unknown) plus `steps` — the full git commands and the
+// downloads — and `problems`: what the Client's download policy would refuse.
+function planTask(spec, jobDir, cfg){
+  const { workDir, downloadsDir } = taskDirs(jobDir),
+    steps = [],
+    problems = [],
+    allowed = (url) => {
+      try {
+        return downloadAccess(url, cfg);
+      }
+      catch (err){
+        problems.push(err.message);
+        return null;
+      }
+    };
+  if (spec.git){
+    allowed(spec.git.url);
+    const git = gitSteps(spec.git, workDir),
+      cmd = (args) => shellJoin(['git', ...args]);
+    steps.push(
+      'env GIT_TERMINAL_PROMPT=0 GIT_ALLOW_PROTOCOL=' + GIT_ALLOW_PROTOCOL + ' for every git command:',
+      ...[...git.setup, ...git.fetch].map(cmd),
+      `if that fetch fails: ${git.fallback.map(cmd).join(' && ')}`,
+      cmd(git.revParse)
+    );
+  }
+  const urls = (spec.downloads || []).map((d) => d.url),
+    downloads = downloadNames(urls).map((name) => path.join(downloadsDir, name));
+  for (const [i, url]of urls.entries()){
+    const access = allowed(url);
+    steps.push(`GET ${url} -> ${downloads[i]}${access ? (access.token ? ' (with the Artifactory token)' : ' (no token)') : ''}`);
+  }
+  return { task: { workDir, downloadsDir, downloads, commit: null }, steps, problems };
+}
+
+// A command line to show, quoted the way a POSIX shell would read it back.
+function shellQuote(arg){
+  const s = String(arg);
+  return /^[A-Za-z0-9_@%+=:,./-]+$/.test(s) ? s : `'${s.replace(/'/g, '\'\\\'\'')}'`;
+}
+
+function shellJoin(args){
+  return args.map(shellQuote).join(' ');
+}
+
+module.exports = { prepareTask, planTask, downloadFiles, cloneRepo, gitSteps, downloadNames, downloadAccess, shellQuote, shellJoin };
