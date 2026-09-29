@@ -16,7 +16,8 @@
 
 const fs = require('node:fs'),
   path = require('node:path'),
-  { execFile } = require('node:child_process');
+  { execFile } = require('node:child_process'),
+  { splitArgs } = require('@andrian.yablonskyy/thub-common');
 
 // Git transports allowed for a task's repository — never ext:: (runs a command)
 // or file:// (reads this host). Matches the job spec's own check.
@@ -122,7 +123,10 @@ const looksLikeCommit = (ref) => /^[0-9a-fA-F]{7,40}$/.test(ref || '');
 async function cloneRepo(git, destDir, cfg, { signal, log = () => {} } = {}){
   downloadAccess(git.url, cfg);
   const env = { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_ALLOW_PROTOCOL },
-    g = (...args) => run('git', ['-C', destDir, ...args], { signal, env }),
+    // --git-options: between `git` and the rest, on every call. Never logged
+    // (they may reference credentials).
+    extra = git.options ? splitArgs(git.options) : [],
+    g = (...args) => run('git', [...extra, '-C', destDir, ...args], { signal, env }),
     ref = git.ref || null,
     fetchRef = ref || 'HEAD',
     depth = Number.isInteger(git.depth) ? git.depth : 1,
