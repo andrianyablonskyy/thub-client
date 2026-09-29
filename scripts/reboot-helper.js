@@ -47,7 +47,7 @@ async function main(){
   fs.rmSync(requestFile, { force: true });
 
   const holdFile = path.join(path.dirname(requestFile), 'update-hold.json'),
-    from = `${request.instance || 'a Client'} (${request.cron || 'schedule'})`;
+    from = `${request.instance || 'a Client'} (${request.reason || request.cron || 'schedule'})`;
   if (readHold(holdFile)){
     console.log(`thub-client-reboot: host already held (self-update or reboot in progress) — skipping the reboot asked by ${from}`);
     return 0;

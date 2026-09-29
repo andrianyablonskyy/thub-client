@@ -88,6 +88,15 @@ test('no helper installed: due reboots are only logged; cancel removes the reque
   assert.equal(readHold(hold), null);
 });
 
+test('a reboot from the Coordinator asks the helper right away, with its reason', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'thub-reboot-')),
+    clock = { now: new Date(2026, 8, 29, 14, 0) },
+    s = scheduler(dir, clock);
+  assert.equal(s.requestNow('user reboot request by admin'), true);
+  const request = JSON.parse(fs.readFileSync(path.join(dir, 'reboot-request.json'), 'utf8'));
+  assert.deepEqual([request.instance, request.reason], ['dut1', 'user reboot request by admin']);
+});
+
 // A stand-in for a Client instance's control socket, answering `status`.
 function fakeInstance(runDir, name, state){
   const server = net.createServer((sock) => sock.on('data', () => sock.end(JSON.stringify({ ok: true, ...state.status }) + '\n')));

@@ -323,6 +323,11 @@ class Daemon{
       else if (command.command === 'cancel-reboot'){
         this.reboot.cancel();
       }
+      // "Reboot" on the Coordinator's resource card. The job it was running
+      // got its cancel-job just before this, in the same reply.
+      else if (command.command === 'reboot'){
+        this.reboot.requestNow(command.reason || 'user reboot request');
+      }
     }
   }
 
