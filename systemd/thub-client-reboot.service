@@ -1,0 +1,14 @@
+[Unit]
+Description=TestHub Client scheduled host reboot
+
+# ExecStart and Environment= are rewritten by scripts/install-systemd-unit.js
+# to this install's real node and helper paths, the request file and the
+# instances' runDir. Runs as root (it reboots the host). The helper holds the
+# host (no instance takes new jobs), waits up to 100 min for running jobs and
+# local locks to end — skipping this reboot otherwise — then runs
+# `systemctl reboot`. Nothing from the request file is executed.
+[Service]
+Type=oneshot
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/usr/bin/node /usr/lib/node_modules/@andrian.yablonskyy/thub-client/scripts/reboot-helper.js /home/thub/var/lib/thub/client/reboot-request.json /home/thub/var/lib/thub/client
+TimeoutStartSec=2h

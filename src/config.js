@@ -108,6 +108,11 @@ function loadConfig(configPath = process.env.THUB_CLIENT_CONFIG, overrides = {})
       // Created by the root update helper next to the request while an
       // update is being applied: no instance takes new jobs meanwhile.
       updateHoldFile: raw.updateHoldFile || path.join(varDir, 'update-hold.json'),
+      // Scheduled host reboot (README §10): this instance's schedule as last
+      // sent by the Coordinator, and the host-wide request the root
+      // thub-client-reboot.path unit watches.
+      rebootScheduleFile: raw.rebootScheduleFile || path.join(varDir, instance, 'reboot-schedule.json'),
+      rebootRequestFile: raw.rebootRequestFile || path.join(varDir, 'reboot-request.json'),
       artifactory: resolveArtifactoryConfig(raw.artifactory || {}),
       // Other download sources for firmware and test sources (archives, git
       // repos) — URL prefixes, "*" for any. Never sent the Artifactory token
