@@ -58,7 +58,8 @@ function isConfigured(raw, paths, name){
 
 // A new instance starts from client.json (coordinatorUrl, joinKey, varDir,
 // hw-devices, ...) with the requested type — an SW one without hw-devices;
-// `name` is dropped since the unit passes the instance name as --name. An existing config is kept,
+// `name` is dropped, so it registers under the instance name (the config
+// file's). An existing config is kept,
 // only its type is updated, so re-registering is safe.
 function register(name, type){
   validate(name, type);

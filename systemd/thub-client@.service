@@ -8,8 +8,10 @@ Wants=network-online.target
 # scripts/install-systemd-unit.js at install time to the user who ran
 # `sudo npm i -g`, their ~/.config/thub and ~/var/lib/thub/client, and this
 # install's real node/daemon.js paths. The instance name selects the config
-# file and is passed to the daemon as --name, overriding the file's `name`:
-# thub-client@dut0 reads ~/.config/thub/dut0.json and registers as "dut0".
+# file: thub-client@dut0 reads ~/.config/thub/dut0.json and registers under
+# that file's `name` — "dut0" when it has none. Nothing on the command line
+# overrides it, so a restart (e.g. after a config applied from the
+# dashboard) always comes back with the file's name.
 # ExecStartPre's "+" runs it as root, outside the sandbox below: it writes
 # /etc/udev/rules.d/99-thub-%i.rules from the config's hw.* entries and
 # reloads udev, so the /dev/thub/* symlinks exist before the daemon starts.
@@ -21,7 +23,7 @@ SupplementaryGroups=dialout plugdev docker
 Environment=THUB_CLIENT_CONFIG=/home/thub/.config/thub/%i.json
 WorkingDirectory=/home/thub/var/lib/thub/client
 ExecStartPre=+/usr/bin/node /usr/lib/node_modules/@andrian.yablonskyy/thub-client/src/udev.js --config /home/thub/.config/thub/%i.json
-ExecStart=/usr/bin/node /usr/lib/node_modules/@andrian.yablonskyy/thub-client/src/daemon.js --name %i
+ExecStart=/usr/bin/node /usr/lib/node_modules/@andrian.yablonskyy/thub-client/src/daemon.js --config /home/thub/.config/thub/%i.json
 Restart=always
 RestartSec=2
 NoNewPrivileges=yes

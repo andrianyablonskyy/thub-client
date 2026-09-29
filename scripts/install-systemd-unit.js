@@ -70,7 +70,7 @@ function renderUnit(user, paths){
     .replace(/^Environment=THUB_CLIENT_CONFIG=.*$/m, `Environment=THUB_CLIENT_CONFIG=${paths.configDir}/%i.json`)
     .replace(/^WorkingDirectory=.*$/m, `WorkingDirectory=${paths.varDir}`)
     .replace(/^ExecStartPre=.*$/m, `ExecStartPre=+${process.execPath} ${UDEV_SYNC_PATH} --config ${paths.configDir}/%i.json`)
-    .replace(/^ExecStart=.*$/m, `ExecStart=${process.execPath} ${DAEMON_PATH} --name %i`)
+    .replace(/^ExecStart=.*$/m, `ExecStart=${process.execPath} ${DAEMON_PATH} --config ${paths.configDir}/%i.json`)
     .replace(/^ReadWritePaths=.*$/m, `ReadWritePaths=${writable}`);
 }
 

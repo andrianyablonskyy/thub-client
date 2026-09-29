@@ -401,7 +401,7 @@ class Daemon{
       if (type !== this.config.type){
         throw new Error(`it's a ${type} config, but this is a ${this.config.type} Client`);
       }
-      applyEditableConfig(this.config.configPath, type, config, file || null);
+      applyEditableConfig(this.config.configPath, type, config, file || null, this._identity());
       this.configState = { revision, error: null };
       this.restartForConfig = true;
       console.log(`config revision ${revision} from the Coordinator written to ${this.config.configPath}; restarting once idle`);
@@ -411,6 +411,16 @@ class Daemon{
       console.error(this.configState.error);
     }
     writeAppliedConfigRevision(this.config.configRevisionFile, this.configState.revision, this.configState.error);
+  }
+
+  // What this Client runs as — pinned in its config file whenever a config
+  // is applied, so however it's restarted (systemd, reload in place, a
+  // reboot) it comes back with the same Coordinator, name, type and join
+  // key. A join key from THUB_CLIENT_JOIN_KEY stays in the environment,
+  // where the restarted process gets it again.
+  _identity(){
+    const { coordinatorUrl, name, type, joinKey } = this.config;
+    return { coordinatorUrl, name, type, ...(process.env.THUB_CLIENT_JOIN_KEY ? {} : { joinKey }) };
   }
 
   // Under systemd (INVOCATION_ID) exit and let Restart= bring the Client
@@ -540,8 +550,10 @@ function sleep(ms){
 // be started without exporting THUB_CLIENT_CONFIG first — the same escape
 // hatch `thub-client --config <path> ...` has, for running several Client
 // instances on one host (§8.6) — and --name/-n <name> (or --name=<name>),
-// which overrides the config file's `name`; the systemd unit passes its
-// instance name here, so thub-client@dut1 registers as "dut1". No commander
+// which overrides the config file's `name` for a Client started by hand
+// (the systemd unit passes only --config: the file's `name`, else its
+// instance name). A config applied from the dashboard pins the name it runs
+// under into the file (_identity), so --name only matters until then. No commander
 // dependency here since these are the only flags the daemon entry point takes.
 function optionFromArgv(argv, long, short){
   for (let i = 0; i < argv.length; i++){
