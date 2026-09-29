@@ -1,7 +1,6 @@
 /**
  * @file        packages/client/src/downloader.js
- * @description Prepares a task's inputs — its downloaded files and git checkout — under the Client's download
- *              policy: the Artifactory token only goes to allowedArtifactPrefixes (README §8.1, §12)
+ * @description Prepares a task's inputs — its downloaded files and git checkout (README §8.1)
  *
  * @author      Andrian Yablonskyy
  * @copyright   Copyright (c) 2026 Andrian Yablonskyy. All rights reserved.
@@ -21,38 +20,13 @@ const fs = require('node:fs'),
 
 // Git transports allowed for a task's repository — never ext:: (runs a command)
 // or file:// (reads this host). Matches the job spec's own check.
-const GIT_ALLOW_PROTOCOL = 'http:https:ssh:git',
+const GIT_ALLOW_PROTOCOL = 'http:https:ssh:git';
 
-  matches = (url, prefixes) => (prefixes || []).some((p) => p === '*' || url.startsWith(p));
-
-// §8.1 step 3 / §12 — where may this Client fetch from, and with which
-// credentials? Returns { token } (token may be null), or throws.
-//   - under artifactory.allowedArtifactPrefixes: allowed, with the Client's
-//     read-only Artifactory token;
-//   - under sources.allowedPrefixes ("*" = anywhere): allowed, never with
-//     the token — e.g. an internal git server, http://localhost/...;
-//   - neither list configured at all: allowed, with the token (the original
-//     behavior, before either list existed).
-function downloadAccess(url, cfg){
-  const artifactory = cfg.artifactory || {},
-    artifactoryPrefixes = artifactory.allowedArtifactPrefixes || [],
-    sourcePrefixes = cfg.sources?.allowedPrefixes || [];
-  if (matches(url, artifactoryPrefixes) || (!artifactoryPrefixes.length && !sourcePrefixes.length)){
-    return { token: artifactory.token || null };
-  }
-  if (matches(url, sourcePrefixes)){
-    return { token: null };
-  }
-  throw new Error(
-    `${url} isn't an allowed download source for this Client — add its prefix to "sources": { "allowedPrefixes": [...] } ` +
-      '(no Artifactory token is sent there; "*" allows any) or, for Artifactory, to artifactory.allowedArtifactPrefixes'
-  );
-}
-
+// A plain GET: nothing is ever sent along with a download. A source that
+// needs credentials is fetched by the job's command, with a token from --env.
 // `signal` lets a job cancel abort a download in progress (runner.js).
-async function fetchToFile(url, destPath, { token, signal } = {}){
-  const headers = token ? { Authorization: `Bearer ${token}` } : {},
-    res = await fetch(url, { headers, signal });
+async function fetchToFile(url, destPath, { signal } = {}){
+  const res = await fetch(url, { signal });
   if (!res.ok){
     throw new Error(`Download failed (${res.status}) for ${url}`);
   }
@@ -97,16 +71,15 @@ function downloadNames(urls){
 
 // --download-file: each URL into `destDir`, before the command runs.
 // Returns the absolute paths, in the job's order.
-async function downloadFiles(downloads, destDir, cfg, { signal, log = () => {} } = {}){
+async function downloadFiles(downloads, destDir, { signal, log = () => {} } = {}){
   const urls = (downloads || []).map((d) => d.url),
     names = downloadNames(urls),
     paths = [];
   fs.mkdirSync(destDir, { recursive: true });
   for (const [i, url]of urls.entries()){
-    const { token } = downloadAccess(url, cfg),
-      dest = path.join(destDir, names[i]);
+    const dest = path.join(destDir, names[i]);
     log(`downloading ${url} -> ${path.join(path.basename(destDir), names[i])}`);
-    await fetchToFile(url, dest, { token, signal });
+    await fetchToFile(url, dest, { signal });
     paths.push(dest);
   }
   return paths;
@@ -121,8 +94,7 @@ const looksLikeCommit = (ref) => /^[0-9a-fA-F]{7,40}$/.test(ref || '');
 // validated by the job spec (never an option-like "-..."), the transport is
 // restricted, and git never prompts.
 // `env`: the job's own (`--env`), under git's safety settings.
-async function cloneRepo(git, destDir, cfg, { signal, log = () => {}, env: jobEnv = {} } = {}){
-  downloadAccess(git.url, cfg);
+async function cloneRepo(git, destDir, { signal, log = () => {}, env: jobEnv = {} } = {}){
   const env = { ...process.env, ...jobEnv, GIT_TERMINAL_PROMPT: '0', GIT_ALLOW_PROTOCOL },
     steps = gitSteps(git, destDir),
     g = (args) => run('git', args, { signal, env });
@@ -189,32 +161,21 @@ function taskDirs(jobDir){
 
 // A task's inputs, before its command runs. Returns { workDir, downloadsDir,
 // downloads, commit }.
-async function prepareTask(spec, jobDir, cfg, { signal, log } = {}){
+async function prepareTask(spec, jobDir, { signal, log } = {}){
   const { workDir, downloadsDir } = taskDirs(jobDir),
-    commit = spec.git ? await cloneRepo(spec.git, workDir, cfg, { signal, log, env: spec.env }) : null;
+    commit = spec.git ? await cloneRepo(spec.git, workDir, { signal, log, env: spec.env }) : null;
   fs.mkdirSync(workDir, { recursive: true });
-  const downloads = await downloadFiles(spec.downloads, downloadsDir, cfg, { signal, log });
+  const downloads = await downloadFiles(spec.downloads, downloadsDir, { signal, log });
   return { workDir, downloadsDir, downloads, commit };
 }
 
 // What prepareTask would do, without doing it (a dry run): the task it would
 // return (commit unknown) plus `steps` — the full git commands and the
-// downloads — and `problems`: what the Client's download policy would refuse.
-function planTask(spec, jobDir, cfg){
+// downloads.
+function planTask(spec, jobDir){
   const { workDir, downloadsDir } = taskDirs(jobDir),
-    steps = [],
-    problems = [],
-    allowed = (url) => {
-      try {
-        return downloadAccess(url, cfg);
-      }
-      catch (err){
-        problems.push(err.message);
-        return null;
-      }
-    };
+    steps = [];
   if (spec.git){
-    allowed(spec.git.url);
     const git = gitSteps(spec.git, workDir),
       cmd = (args) => shellJoin(['git', ...args]);
     steps.push(
@@ -227,10 +188,9 @@ function planTask(spec, jobDir, cfg){
   const urls = (spec.downloads || []).map((d) => d.url),
     downloads = downloadNames(urls).map((name) => path.join(downloadsDir, name));
   for (const [i, url]of urls.entries()){
-    const access = allowed(url);
-    steps.push(`GET ${url} -> ${downloads[i]}${access ? (access.token ? ' (with the Artifactory token)' : ' (no token)') : ''}`);
+    steps.push(`GET ${url} -> ${downloads[i]}`);
   }
-  return { task: { workDir, downloadsDir, downloads, commit: null }, steps, problems };
+  return { task: { workDir, downloadsDir, downloads, commit: null }, steps };
 }
 
 // A command line to show, quoted the way a POSIX shell would read it back.
@@ -243,4 +203,4 @@ function shellJoin(args){
   return args.map(shellQuote).join(' ');
 }
 
-module.exports = { prepareTask, planTask, downloadFiles, cloneRepo, gitSteps, downloadNames, downloadAccess, shellQuote, shellJoin };
+module.exports = { prepareTask, planTask, downloadFiles, cloneRepo, gitSteps, downloadNames, shellQuote, shellJoin };

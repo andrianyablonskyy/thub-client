@@ -34,7 +34,7 @@ class JobRunner{
     this.canceled = false;
     this.child = null;
     // Aborts downloads in progress on cancel — without it a cancel only
-    // lands between steps, and a hung Artifactory would never let go.
+    // lands between steps, and a hung download server would never let go.
     this.abort = new AbortController();
     this.jobUser = null;
   }
@@ -105,7 +105,7 @@ class JobRunner{
 
       // The task's inputs next: its git checkout (where the command runs)
       // and its downloaded files (README §8.1).
-      const task = { ...await prepareTask(job.spec, jobDir, this.config, {
+      const task = { ...await prepareTask(job.spec, jobDir, {
         signal: this.abort.signal,
         log: (line) => logShipper.push('runner', line)
       }), dockerConfig };
@@ -189,7 +189,7 @@ class JobRunner{
   // its working directory and environment), plus what this Client's config
   // would refuse. Useful for proving the Coordinator<->Client plumbing
   // end-to-end, and checking a job, without real hardware, a real emulator
-  // image, or a real Artifactory.
+  // image, or reachable download servers.
   async _runDryRun(job, jobDir, logShipper){
     try {
       await this.client.post(`/jobs/${job.id}/accept`);
@@ -294,7 +294,7 @@ function dryRunPlan(job, jobDir, config){
     executor = spec.target.type === 'hw' ? new HwExecutor(config, null) : new SwExecutor(config, null),
     login = dockerLoginFor(spec.env),
     dockerConfig = login ? path.join(jobDir, 'docker') : null,
-    { task, steps: inputs, problems } = planTask(spec, jobDir, config),
+    { task, steps: inputs } = planTask(spec, jobDir),
     dut = executor.plan(job, task.downloads.length ? task.downloadsDir : null, { login }),
     env = jobEnv(job, { ...task, git: Boolean(spec.git), dockerConfig }, dut.env),
     // Job --env values that look like secrets stay out of the log.
@@ -316,7 +316,7 @@ function dryRunPlan(job, jobDir, config){
       shellJoin(['sh', ...commandArgs(spec)])
     ]),
     ...section('then, whatever the result', dut.teardown),
-    ...[...problems, ...(dut.problems || [])].map((p) => `WOULD FAIL: ${p}`)
+    ...(dut.problems || []).map((p) => `WOULD FAIL: ${p}`)
   ];
 }
 

@@ -38,8 +38,8 @@ function fakeDocker(){
   };
 }
 
-function executor(sw){
-  const ex = new SwExecutor({ sw: { allowDockerHub: true, ...sw } }, { push: () => {} }),
+function executor(){
+  const ex = new SwExecutor({}, { push: () => {} }),
     docker = fakeDocker();
   ex.docker = docker;
   return { ex, docker };
@@ -47,33 +47,21 @@ function executor(sw){
 
 const job = (image) => ({ id: 'M-00001', spec: { target: { type: 'sw' }, command: 'x', ...(image ? { image } : {}) } });
 
-test('no job image: the Client\'s own sw.image, with sw.cmd and the downloads mounted read-only', async () => {
-  const { ex, docker } = executor({ image: 'dut-emulator:1', cmd: ['--firmware', '/downloads/app.bin'] });
-  await ex.prepare(job(), '/job/downloads');
-  assert.equal(docker.calls.created.Image, 'dut-emulator:1');
-  assert.deepEqual(docker.calls.created.Cmd, ['--firmware', '/downloads/app.bin']);
-  assert.deepEqual(docker.calls.created.HostConfig.Binds, ['/job/downloads:/downloads:ro']);
-  assert.equal(docker.calls.created.HostConfig.ReadonlyRootfs, true);
+test('a job image runs as-is (its own command), sandboxed, fixed limits, the downloads mounted read-only', async () => {
+  const { ex, docker } = executor();
+  await ex.prepare(job('alpine'), '/job/downloads');
+  const created = docker.calls.created;
+  assert.equal(created.Image, 'alpine');
+  assert.equal(created.Cmd, undefined);
+  assert.deepEqual(created.HostConfig.Binds, ['/job/downloads:/downloads:ro']);
+  assert.deepEqual([created.HostConfig.ReadonlyRootfs, created.HostConfig.NetworkMode], [true, 'net1']);
+  assert.deepEqual([created.HostConfig.NanoCpus, created.HostConfig.Memory], [2e9, 2 * 1024 ** 3]);
   assert.equal(ex.envFor().THUB_DUT_CONTAINER, 'thub-M-00001');
 });
 
-test('a job image runs as-is (its own command), same sandbox, when allowed', async () => {
-  const { ex, docker } = executor({ image: 'dut-emulator:1', cmd: ['--x'], allowJobImages: true });
-  await ex.prepare(job('alpine'), null);
-  assert.equal(docker.calls.created.Image, 'alpine');
-  assert.equal(docker.calls.created.Cmd, undefined);
-  assert.equal(docker.calls.created.HostConfig.Binds, undefined);
-  assert.equal(docker.calls.created.HostConfig.ReadonlyRootfs, true);
-  assert.equal(docker.calls.created.HostConfig.NetworkMode, 'net1');
-});
-
-test('a job image is refused unless sw.allowJobImages; no image at all means no container', async () => {
-  const refused = executor({ image: 'dut-emulator:1' });
-  await assert.rejects(refused.ex.prepare(job('alpine'), null), /allowJobImages/);
-  assert.equal(refused.docker.calls.created, null);
-
-  const none = executor({});
-  await none.ex.prepare(job(), null);
-  assert.equal(none.docker.calls.created, null);
-  assert.deepEqual(none.ex.envFor(), {});
+test('no job image means no container', async () => {
+  const { ex, docker } = executor();
+  await ex.prepare(job(), null);
+  assert.equal(docker.calls.created, null);
+  assert.deepEqual(ex.envFor(), {});
 });

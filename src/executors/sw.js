@@ -18,11 +18,14 @@ const net = require('node:net'),
   { shellJoin } = require('../downloader'),
   { registryHost } = require('../docker-login');
 
-// §8.3 SW executor: runs the DUT emulator in Docker, per job — isolated
-// network, read-only rootfs, resource limits, always removed (§12).
+// §8.3 SW executor: runs a job's DUT image (--docker-image) in Docker, per
+// job — isolated network, read-only rootfs, fixed resource limits, always
+// removed (§12). An SW Client has no settings of its own.
+const DUT_CPUS = 2,
+  DUT_MEMORY = '2g';
+
 class SwExecutor{
   constructor(config, logShipper){
-    this.config = config.sw || {};
     this.logShipper = logShipper;
     this.docker = new Docker();
     this.container = null;
@@ -31,25 +34,19 @@ class SwExecutor{
     this.containerName = null;
   }
 
-  // The DUT container: the job's own Docker image (--docker-image; only if
-  // sw.allowJobImages) run with its default command, else this Client's
-  // sw.image with sw.cmd (if set). The job's downloads are mounted read-only
-  // at /downloads. With neither image, there's no container: the command
-  // runs on its own. Same sandbox either way.
-  // `login`: the job's own registry login (docker-login.js), used to pull
+  // The DUT container: the job's own Docker image (--docker-image), run with
+  // its default command, the job's downloads mounted read-only at
+  // /downloads. Without one there's no container: the command runs on its
+  // own. `login`: the job's registry login (docker-login.js), used to pull
   // from that registry.
   async prepare(job, downloadsDir, { login = null } = {}){
-    const jobImage = job.spec.image || null,
-      image = jobImage || this.config.image;
-    if (jobImage && !this.config.allowJobImages){
-      throw new Error(`This Client doesn't run job-supplied Docker images (${jobImage}) — set sw.allowJobImages: true in its config`);
-    }
+    const image = job.spec.image || null;
     if (!image){
-      this.logShipper.push('emulator', 'no Docker image (job or sw.image) — running the command without a DUT container');
+      this.logShipper.push('emulator', 'no --docker-image — running the command without a DUT container');
       return;
     }
 
-    const ref = await this._resolveImage(image, login);
+    const ref = await this._pullIfMissing(image, login);
     this.containerName = `thub-${job.id}`;
 
     this.network = await this.docker.createNetwork({ Name: `thub-job-${job.id}`, Driver: 'bridge' });
@@ -57,13 +54,12 @@ class SwExecutor{
     this.container = await this.docker.createContainer({
       Image: ref,
       name: this.containerName,
-      ...(!jobImage && Array.isArray(this.config.cmd) ? { Cmd: this.config.cmd.map(String) } : {}),
       ExposedPorts: { '5555/tcp': {} },
       HostConfig: {
         AutoRemove: false,
         NetworkMode: this.network.id,
-        Memory: parseSize(this.config.memory || '2g'),
-        NanoCpus: (this.config.cpus || 2) * 1e9,
+        Memory: parseSize(DUT_MEMORY),
+        NanoCpus: DUT_CPUS * 1e9,
         ReadonlyRootfs: true,
         ...(downloadsDir ? { Binds: [`${downloadsDir}:/downloads:ro`] } : {}),
         PortBindings: { '5555/tcp': [{ HostIp: '127.0.0.1', HostPort: '0' }] }
@@ -71,7 +67,7 @@ class SwExecutor{
     });
 
     await this.container.start();
-    this.logShipper.push('emulator', `started container ${this.containerName} from ${ref}${jobImage ? ' (job image)' : ''}`);
+    this.logShipper.push('emulator', `started container ${this.containerName} from ${ref}`);
 
     const inspect = await this.container.inspect();
     this.hostPort = inspect.NetworkSettings.Ports['5555/tcp']?.[0]?.HostPort;
@@ -93,71 +89,46 @@ class SwExecutor{
   // commands (the Client uses the Docker API), without doing it (a dry run):
   // { steps, teardown, env, problems }.
   plan(job, downloadsDir, { login = null } = {}){
-    const jobImage = job.spec.image || null,
-      image = jobImage || this.config.image;
-    if (jobImage && !this.config.allowJobImages){
-      return { steps: [], teardown: [], env: {}, problems: [
-        `This Client doesn't run job-supplied Docker images (${jobImage}) — set sw.allowJobImages: true in its config`
-      ] };
-    }
+    const image = job.spec.image || null;
     if (!image){
-      return { steps: ['no Docker image (job or sw.image) — the command runs without a DUT container'], teardown: [], env: {}, problems: [] };
+      return { steps: ['no --docker-image — the command runs without a DUT container'], teardown: [], env: {}, problems: [] };
     }
-    const sources = imageSources(image, this.config, login),
+    const { label, ref, auth } = imageSource(image, login),
       container = `thub-${job.id}`,
-      network = `thub-job-${job.id}`,
-      ref = sources[0]?.ref || image,
-      cmd = !jobImage && Array.isArray(this.config.cmd) ? this.config.cmd.map(String) : [];
+      network = `thub-job-${job.id}`;
     return {
       steps: [
-        ...(sources.length
-          ? sources.map(({ label, ref: r, auth }, i) =>
-            `${i ? 'else ' : ''}docker pull ${r}   # ${label}${auth ? ` as ${auth.username}` : ''}, unless already cached`)
-          : []),
+        `docker pull ${ref}   # ${label}${auth ? ` as ${auth.username}` : ''}, unless already cached`,
         `docker network create --driver bridge ${network}`,
         shellJoin([
           'docker', 'run', '-d', '--name', container, '--network', network,
-          '--memory', this.config.memory || '2g', '--cpus', String(this.config.cpus || 2), '--read-only',
+          '--memory', DUT_MEMORY, '--cpus', String(DUT_CPUS), '--read-only',
           ...(downloadsDir ? ['-v', `${downloadsDir}:/downloads:ro`] : []),
-          '-p', '127.0.0.1::5555', ref, ...cmd
+          '-p', '127.0.0.1::5555', ref
         ]),
         'wait up to 10 s for 127.0.0.1:<host port> (container port 5555)'
       ],
       teardown: [`docker stop -t 5 ${container}`, `docker rm -f ${container}`, `docker network rm ${network}`],
       env: { THUB_DUT_HOST: '127.0.0.1:<host port>', THUB_DUT_CONTAINER: container },
-      problems: sources.length ? [] : ['No image source for sw.image: set sw.registry (local registry) and/or sw.allowDockerHub: true']
+      problems: []
     };
   }
 
-  // Finds `sw.image` in order (README §8.3): the local registry
-  // (`sw.registry`), then Docker Hub if `sw.allowDockerHub`, else fails.
-  // Each source counts if its image is already cached here or pulls now.
-  // Returns the image reference to run.
-  async _resolveImage(image, login){
-    const sources = imageSources(image, this.config, login),
-      tried = [];
-    if (!sources.length){
-      throw new Error('No image source for sw.image: set sw.registry (local registry) and/or sw.allowDockerHub: true');
+  // The image as referenced, pulled unless it's already cached here.
+  async _pullIfMissing(image, login){
+    const { label, ref, auth } = imageSource(image, login);
+    if (await this._isCached(ref)){
+      this.logShipper.push('emulator', `using cached image ${ref}`);
+      return ref;
     }
-    for (const { label, ref, auth }of sources){
-      try {
-        if (await this._isCached(ref)){
-          this.logShipper.push('emulator', `using cached image ${ref} (${label})`);
-          return ref;
-        }
-        this.logShipper.push('emulator', `pulling ${ref} from ${label}`);
-        await this._pull(ref, auth);
-        return ref;
-      }
-      catch (err){
-        this.logShipper.push('emulator', `${label}: ${ref} not available (${err.message})`);
-        tried.push(`${label}: ${err.message}`);
-      }
+    this.logShipper.push('emulator', `pulling ${ref} from ${label}${auth ? ` as ${auth.username}` : ''}`);
+    try {
+      await this._pull(ref, auth);
     }
-    if (!this.config.allowDockerHub && this.config.registry){
-      tried.push('Docker Hub: disabled (sw.allowDockerHub)');
+    catch (err){
+      throw new Error(`Image ${ref} not available from ${label}: ${err.message}`);
     }
-    throw new Error(`Image ${image} not found — ${tried.join('; ')}`);
+    return ref;
   }
 
   async _isCached(ref){
@@ -206,32 +177,18 @@ class SwExecutor{
   }
 }
 
-// Docker Hub's own hostnames; `docker.io/library/ubuntu` is just `ubuntu`.
-const DOCKER_HUB_HOSTS = new Set(['docker.io', 'index.docker.io', 'registry-1.docker.io', 'registry.hub.docker.com']);
-
-// Where to look for `image`, in order. `image` is normally a plain
-// repository name (`dut-emulator:2026.08`, `library/ubuntu:24.04`); one
-// that names its own registry host is used as-is, from that host only.
-// A job's own registry login (`login`, docker-login.js) wins over the
-// Client's sw.registryAuth for the registry it names.
-function imageSources(image, { registry, allowDockerHub, registryAuth }, login = null){
+// Where `image` comes from: the registry host it names (`registry.lab:5000/
+// emu:1`), else Docker Hub (`alpine`, `library/ubuntu:24.04`). The job's
+// registry login (`login`, docker-login.js) is used for the registry it
+// names. Returns { label, ref, auth }.
+function imageSource(image, login = null){
   const [first, ...rest] = image.split('/'),
-    hasHost = rest.length > 0 && (first.includes('.') || first.includes(':') || first === 'localhost'),
-    authFor = (host, fallback) => (login && registryHost(login.registry) === registryHost(host)
+    host = rest.length > 0 && (first.includes('.') || first.includes(':') || first === 'localhost') ? first : null,
+    label = host ? `registry ${host}` : 'Docker Hub',
+    auth = login && registryHost(login.registry) === registryHost(host || 'docker.io')
       ? { username: login.username, password: login.password, serveraddress: registryHost(login.registry) }
-      : fallback);
-  if (hasHost && !DOCKER_HUB_HOSTS.has(first)){
-    return [{ label: `registry ${first}`, ref: image, auth: authFor(first, first === registry ? registryAuth : null) }];
-  }
-  const name = hasHost ? rest.join('/') : image,
-    sources = [];
-  if (registry){
-    sources.push({ label: `local registry ${registry}`, ref: `${registry}/${name}`, auth: authFor(registry, registryAuth) });
-  }
-  if (allowDockerHub){
-    sources.push({ label: 'Docker Hub', ref: name, auth: null });
-  }
-  return sources;
+      : null;
+  return { label, ref: image, auth };
 }
 
 function parseSize(s){
@@ -262,4 +219,4 @@ function waitForTcp(host, port, timeoutMs){
   });
 }
 
-module.exports = { SwExecutor, imageSources };
+module.exports = { SwExecutor, imageSource };
