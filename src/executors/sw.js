@@ -15,7 +15,8 @@
 
 const net = require('node:net'),
   Docker = require('dockerode'),
-  { shellJoin } = require('../downloader');
+  { shellJoin } = require('../downloader'),
+  { registryHost } = require('../docker-login');
 
 // §8.3 SW executor: runs the DUT emulator in Docker, per job — isolated
 // network, read-only rootfs, resource limits, always removed (§12).
@@ -35,7 +36,9 @@ class SwExecutor{
   // sw.image with sw.cmd (if set). The job's downloads are mounted read-only
   // at /downloads. With neither image, there's no container: the command
   // runs on its own. Same sandbox either way.
-  async prepare(job, downloadsDir){
+  // `login`: the job's own registry login (docker-login.js), used to pull
+  // from that registry.
+  async prepare(job, downloadsDir, { login = null } = {}){
     const jobImage = job.spec.image || null,
       image = jobImage || this.config.image;
     if (jobImage && !this.config.allowJobImages){
@@ -46,7 +49,7 @@ class SwExecutor{
       return;
     }
 
-    const ref = await this._resolveImage(image);
+    const ref = await this._resolveImage(image, login);
     this.containerName = `thub-${job.id}`;
 
     this.network = await this.docker.createNetwork({ Name: `thub-job-${job.id}`, Driver: 'bridge' });
@@ -89,7 +92,7 @@ class SwExecutor{
   // What prepare()/teardown() would do, as the equivalent docker CLI
   // commands (the Client uses the Docker API), without doing it (a dry run):
   // { steps, teardown, env, problems }.
-  plan(job, downloadsDir){
+  plan(job, downloadsDir, { login = null } = {}){
     const jobImage = job.spec.image || null,
       image = jobImage || this.config.image;
     if (jobImage && !this.config.allowJobImages){
@@ -100,7 +103,7 @@ class SwExecutor{
     if (!image){
       return { steps: ['no Docker image (job or sw.image) — the command runs without a DUT container'], teardown: [], env: {}, problems: [] };
     }
-    const sources = imageSources(image, this.config),
+    const sources = imageSources(image, this.config, login),
       container = `thub-${job.id}`,
       network = `thub-job-${job.id}`,
       ref = sources[0]?.ref || image,
@@ -108,7 +111,8 @@ class SwExecutor{
     return {
       steps: [
         ...(sources.length
-          ? sources.map(({ label, ref: r }, i) => `${i ? 'else ' : ''}docker pull ${r}   # ${label}, unless already cached`)
+          ? sources.map(({ label, ref: r, auth }, i) =>
+            `${i ? 'else ' : ''}docker pull ${r}   # ${label}${auth ? ` as ${auth.username}` : ''}, unless already cached`)
           : []),
         `docker network create --driver bridge ${network}`,
         shellJoin([
@@ -129,8 +133,8 @@ class SwExecutor{
   // (`sw.registry`), then Docker Hub if `sw.allowDockerHub`, else fails.
   // Each source counts if its image is already cached here or pulls now.
   // Returns the image reference to run.
-  async _resolveImage(image){
-    const sources = imageSources(image, this.config),
+  async _resolveImage(image, login){
+    const sources = imageSources(image, this.config, login),
       tried = [];
     if (!sources.length){
       throw new Error('No image source for sw.image: set sw.registry (local registry) and/or sw.allowDockerHub: true');
@@ -208,16 +212,21 @@ const DOCKER_HUB_HOSTS = new Set(['docker.io', 'index.docker.io', 'registry-1.do
 // Where to look for `image`, in order. `image` is normally a plain
 // repository name (`dut-emulator:2026.08`, `library/ubuntu:24.04`); one
 // that names its own registry host is used as-is, from that host only.
-function imageSources(image, { registry, allowDockerHub, registryAuth }){
+// A job's own registry login (`login`, docker-login.js) wins over the
+// Client's sw.registryAuth for the registry it names.
+function imageSources(image, { registry, allowDockerHub, registryAuth }, login = null){
   const [first, ...rest] = image.split('/'),
-    hasHost = rest.length > 0 && (first.includes('.') || first.includes(':') || first === 'localhost');
+    hasHost = rest.length > 0 && (first.includes('.') || first.includes(':') || first === 'localhost'),
+    authFor = (host, fallback) => (login && registryHost(login.registry) === registryHost(host)
+      ? { username: login.username, password: login.password, serveraddress: registryHost(login.registry) }
+      : fallback);
   if (hasHost && !DOCKER_HUB_HOSTS.has(first)){
-    return [{ label: `registry ${first}`, ref: image, auth: first === registry ? registryAuth : null }];
+    return [{ label: `registry ${first}`, ref: image, auth: authFor(first, first === registry ? registryAuth : null) }];
   }
   const name = hasHost ? rest.join('/') : image,
     sources = [];
   if (registry){
-    sources.push({ label: `local registry ${registry}`, ref: `${registry}/${name}`, auth: registryAuth });
+    sources.push({ label: `local registry ${registry}`, ref: `${registry}/${name}`, auth: authFor(registry, registryAuth) });
   }
   if (allowDockerHub){
     sources.push({ label: 'Docker Hub', ref: name, auth: null });
