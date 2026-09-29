@@ -94,29 +94,36 @@ class RebootScheduler{
       return false;
     }
     this.lastFiredMinute = minute;
-    return this._request(now);
+    return this._request(now, `scheduled reboot (${this.cron})`, { cron: this.cron, scheduledFor: now.toISOString() });
   }
 
-  _request(now){
+  // The Coordinator's `reboot` command (resource card "Reboot"): same path
+  // as a scheduled one — the root helper reboots once nothing is busy.
+  requestNow(reason = 'user reboot request'){
+    const now = this.now();
+    return this._request(now, `reboot (${reason})`, { reason, requestedAt: now.toISOString() });
+  }
+
+  _request(now, what, details){
     const hold = readHold(this.holdFile);
     if (hold){
-      this.log.warn(`scheduled reboot (${this.cron}) skipped: the host is already held for a ${hold.reason === 'reboot' ? 'reboot' : 'self-update'}`);
+      this.log.warn(`${what} skipped: the host is already held for a ${hold.reason === 'reboot' ? 'reboot' : 'self-update'}`);
       return false;
     }
     if (!fs.existsSync(this.pathUnit)){
       this.log.warn(
-        `scheduled reboot (${this.cron}) is due, but ${this.pathUnit} isn't installed — ` +
+        `${what} requested, but ${this.pathUnit} isn't installed — ` +
           'reinstall the Client as root (sudo npm i -g @andrian.yablonskyy/thub-client) to enable host reboots'
       );
       return false;
     }
     try {
-      fs.writeFileSync(this.requestFile, JSON.stringify({ instance: this.instance, cron: this.cron, scheduledFor: now.toISOString() }) + '\n');
-      this.log.log(`scheduled reboot due (${this.cron}): asked the host to reboot once no instance is busy`);
+      fs.writeFileSync(this.requestFile, JSON.stringify({ instance: this.instance, ...details }) + '\n');
+      this.log.log(`${what}: asked the host to reboot once no instance is busy`);
       return true;
     }
     catch (err){
-      this.log.error(`scheduled reboot request failed: ${err.message}`);
+      this.log.error(`${what} request failed: ${err.message}`);
       return false;
     }
   }
