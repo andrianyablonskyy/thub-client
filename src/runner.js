@@ -18,13 +18,11 @@ const fs = require('node:fs'),
   { spawn } = require('node:child_process'),
   { JOB_STATES, JOB_ENV_MASK } = require('@andrian.yablonskyy/thub-common'),
   { prepareTask, planTask, shellQuote, shellJoin } = require('./downloader'),
-  { dockerLoginFor, dockerLogin, LOGIN_SCRIPT } = require('./docker-login'),
   { LogShipper } = require('./log-shipper'),
   { HwExecutor } = require('./executors/hw'),
   { SwExecutor } = require('./executors/sw');
 
-const KILL_GRACE_MS = 10_000,
-  SECRET_NAME = /PASS|SECRET|TOKEN|KEY|PWD|CRED|AUTH/i;
+const KILL_GRACE_MS = 10_000;
 
 // §8.1 Job execution lifecycle on the Client.
 class JobRunner{
@@ -93,29 +91,19 @@ class JobRunner{
     try {
       await this.client.post(`/jobs/${job.id}/accept`);
 
-      // Before anything else runs: the job's registry login, if its --env
-      // asks for one — into its own Docker config dir (DOCKER_CONFIG for its
-      // commands too), removed with the job directory.
-      const login = dockerLoginFor(job.spec.env),
-        dockerConfig = login ? path.join(jobDir, 'docker') : null;
-      if (login){
-        logShipper.push('runner', `docker login ${login.registry} --username ${login.username} --password-stdin`);
-        await dockerLogin(job.spec.env, dockerConfig, { signal: this.abort.signal });
-      }
-
-      // The task's inputs next: its git checkout (where the command runs)
+      // The task's inputs first: its git checkout (where the command runs)
       // and its downloaded files (README §8.1).
-      const task = { ...await prepareTask(job.spec, jobDir, {
+      const task = await prepareTask(job.spec, jobDir, {
         signal: this.abort.signal,
         log: (line) => logShipper.push('runner', line)
-      }), dockerConfig };
+      });
       this.task = task;
       if (this.canceled){
         return this._bail(job, executor, logShipper);
       }
 
       logShipper.push('runner', 'preparing DUT');
-      await executor.prepare(job, task.downloads.length ? task.downloadsDir : null, { login });
+      await executor.prepare(job, task.downloads.length ? task.downloadsDir : null);
       if (this.canceled){
         return this._bail(job, executor, logShipper);
       }
@@ -271,12 +259,11 @@ function commandArgs(spec){
 }
 
 // What the job's command gets on top of the Client's own environment: its
-// --env first (the rest are the Client's own; the job spec refuses those
-// names), then DOCKER_CONFIG after its registry login.
+// --env as given (no name means anything to the Client), then the Client's
+// own THUB_* (the job spec refuses those names).
 function jobEnv(job, task, executorEnv){
   return {
     ...job.spec.env,
-    ...(task.dockerConfig ? { DOCKER_CONFIG: task.dockerConfig } : {}),
     ...executorEnv,
     ...metaToEnv(job.spec.meta),
     ...downloadsEnv(task),
@@ -292,22 +279,16 @@ function jobEnv(job, task, executorEnv){
 function dryRunPlan(job, jobDir, config){
   const { spec } = job,
     executor = spec.target.type === 'hw' ? new HwExecutor(config, null) : new SwExecutor(config, null),
-    login = dockerLoginFor(spec.env),
-    dockerConfig = login ? path.join(jobDir, 'docker') : null,
     { task, steps: inputs } = planTask(spec, jobDir),
-    dut = executor.plan(job, task.downloads.length ? task.downloadsDir : null, { login }),
-    env = jobEnv(job, { ...task, git: Boolean(spec.git), dockerConfig }, dut.env),
-    // Job --env values that look like secrets stay out of the log.
-    shown = (k, v) => (spec.env && k in spec.env && SECRET_NAME.test(k) ? JOB_ENV_MASK : v),
+    dut = executor.plan(job, task.downloads.length ? task.downloadsDir : null),
+    env = jobEnv(job, { ...task, git: Boolean(spec.git) }, dut.env),
     jobEnvNames = Object.keys(spec.env || {}),
     section = (title, lines) => (lines.length ? [`${title}:`, ...lines.map((l) => `  ${l}`)] : []);
   return [
     'nothing below is executed on this Client — these are the commands the real job would run',
     `target: ${spec.target.type} labels=${(spec.target.labels || []).join(',') || '(none)'}`,
-    ...section('job environment (--env), for every command below', jobEnvNames.map((k) => `${k}=${shellQuote(shown(k, spec.env[k]))}`)),
-    ...section('registry login (DOCKER_REGISTRY/USERNAME/PASSWORD)', login
-      ? [`mkdir -m 700 ${shellQuote(dockerConfig)}`, `DOCKER_CONFIG=${shellQuote(dockerConfig)} sh -c ${shellQuote(LOGIN_SCRIPT)}`]
-      : []),
+    // --env values are treated as secrets whatever their names: never logged.
+    ...section('job environment (--env, values hidden), for every command below', jobEnvNames.map((k) => `${k}=${JOB_ENV_MASK}`)),
     ...section('task inputs', inputs),
     ...section(spec.target.type === 'hw' ? 'DUT (HW executor)' : 'DUT (SW executor, docker CLI equivalent)', dut.steps),
     ...section('command', [
