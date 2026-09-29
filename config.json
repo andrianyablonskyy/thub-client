@@ -32,9 +32,7 @@
       { "path": "/dev/thub/dut3-usb", "devpath": "3.3.3.3" },
       { "path": "/dev/thub/dut4-usb", "devpath": "3.2.2" },
       { "path": "/dev/thub/dut5-usb", "devpath": "3.4" }
-    ],
-    "relays": [{ "channel": 0, "baseUrl": "http://localhost:3000" }],
-    "power": { "method": "relay" }
+    ]
   },
   "sw": {
     "image": "alpine",

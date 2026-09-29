@@ -1,6 +1,6 @@
 /**
  * @file        packages/client/src/executors/hw.js
- * @description HW executor: flashes/runs a job against a physical DUT via UART/ST-Link/relay power (README §8.2)
+ * @description HW executor: flashes/runs a job against a physical DUT via UART/ST-Link (README §8.2)
  *
  * @author      Andrian Yablonskyy
  * @copyright   Copyright (c) 2026 Andrian Yablonskyy. All rights reserved.
@@ -13,8 +13,7 @@
 
 'use strict';
 
-const { spawn } = require('node:child_process'),
-  { RelayClient } = require('../relay-client');
+const { spawn } = require('node:child_process');
 
 // §8.2 HW executor: flashes a physical DUT over ST-Link and exposes its
 // UARTs/USB devices. Stable device paths come from the udev rules the Client
@@ -71,14 +70,7 @@ class HwExecutor{
           .map((s) => `udevadm info --query=property --name=${s.path}   # ST-Link serial (ID_SERIAL_SHORT)`),
         ...(cfg.uarts || []).map((u) => `capture UART ${u.path} at ${u.baudRate || 115200} baud (uart log stream)`)
       ],
-      teardown = [];
-    if (cfg.power?.method === 'uhubctl' && cfg.power.hub){
-      teardown.push(`uhubctl -l ${cfg.power.hub} -p ${cfg.power.port} -a cycle`);
-    }
-    else if (cfg.power?.method === 'relay'){
-      teardown.push(...(cfg.relays || []).map((r) => `relay ${r.baseUrl || '(default URL)'}: channel ${r.channel} off, 500 ms, on`));
-    }
-    const env = this.envFor();
+      env = this.envFor();
     for (const [i, s]of (cfg.stlinks || []).entries()){
       if (!s.serial){
         const unknown = `<serial of ${s.path}>`;
@@ -88,7 +80,7 @@ class HwExecutor{
         }
       }
     }
-    return { steps, teardown, env };
+    return { steps, teardown: [], env };
   }
 
   async _stlinkSerial(stlink){
@@ -141,40 +133,11 @@ class HwExecutor{
   }
 
   async teardown(){
-    if (this.config.power?.method === 'uhubctl' && this.config.power.hub){
-      await run('uhubctl', ['-l', this.config.power.hub, '-p', String(this.config.power.port), '-a', 'cycle']).catch(
-        () => {}
-      );
-    }
-    else if (this.config.power?.method === 'relay'){
-      await this._relayCycle().catch((err) => this.logShipper.push('flash', `relay cycle failed: ${err.message}`));
-    }
     await Promise.all(this.serialPorts.filter((p) => p.isOpen).map(
       (p) => new Promise((resolve) => p.close(resolve))
     ));
     this.serialPorts = [];
   }
-
-  // STUB power control via a relay board's REST API — see relay-client.js.
-  // Cycles every channel in hw.relays together: all off, wait, all on.
-  async _relayCycle(){
-    const relays = (this.config.relays || []).map((r) => ({ ...r, client: new RelayClient(r.baseUrl) }));
-    if (!relays.length){
-      throw new Error('hw.power.method is "relay" but hw.relays is empty');
-    }
-    for (const r of relays){
-      this.logShipper.push('flash', `relay: power-cycling channel ${r.channel} via ${r.client.baseUrl}`);
-      await r.client.setRelay(r.channel, false);
-    }
-    await sleep(500);
-    for (const r of relays){
-      await r.client.setRelay(r.channel, true);
-    }
-  }
-}
-
-function sleep(ms){
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 module.exports = { HwExecutor };

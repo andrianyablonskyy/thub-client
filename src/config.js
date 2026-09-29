@@ -15,7 +15,7 @@
 
 const fs = require('node:fs'),
   {
-    validateClientConfig, publicClientConfig, shareableClientConfigFile, importClientConfigFile, CLIENT_CONFIG_PRIVATE_FIELDS
+    validateClientConfig, publicClientConfig, shareableClientConfigFile, importClientConfigFile, withoutPowerControl, CLIENT_CONFIG_PRIVATE_FIELDS
   } = require('@andrian.yablonskyy/thub-common'),
   os = require('node:os'),
   path = require('node:path'),
@@ -33,9 +33,9 @@ const USER_CONFIG_PATH = path.join(os.homedir(), '.config', 'thub', 'client.json
   // it with THUB_CLIENT_CONFIG or ~/.config/thub/client.json (§13).
   PACKAGE_DEFAULT_CONFIG_PATH = path.join(__dirname, '..', 'config.json'),
 
-  // Upper bound on each HW device list (hw.uarts/usbs/stlinks/relays) and on
+  // Upper bound on each HW device list (hw.uarts/usbs/stlinks) and on
   // Client instances per host — matching the dut1..dut8 symlink naming
-  // (udev.js) and a relay board's 8 channels (§8.2, §8.6).
+  // (udev.js, §8.2, §8.6).
   MAX_SLOTS = 8;
 
 // Matches README.md §13 (~/.config/thub/client.json). `overrides.name` (the
@@ -186,8 +186,7 @@ function assertSlotIndex(field, index){
   }
 }
 
-// udev symlinks are named 1-based (dut1..dut8), unlike relay
-// channels, which are the relay board's own 0-7 numbering.
+// udev symlinks are named 1-based (dut1..dut8).
 function assertDeviceIndex(field, index){
   if (!Number.isInteger(index) || index < 1 || index > MAX_SLOTS){
     throw new Error(`${field} must be an integer 1-${MAX_SLOTS}, got ${index}`);
@@ -229,32 +228,21 @@ function resolveDeviceList(field, list, kind){
   });
 }
 
-function resolveRelayList(field, list, defaultBaseUrl){
-  assertListSize(field, list);
-  return list.map((entry, i) => {
-    const item = typeof entry === 'number' ? { channel: entry } : entry;
-    assertSlotIndex(`${field}[${i}].channel`, item?.channel);
-    return { ...item, baseUrl: item.baseUrl || defaultBaseUrl };
-  });
-}
-
-// §8.2/§8.6: up to MAX_SLOTS each of UART adapters, DUT USB devices,
-// ST-Link probes and relay channels per Client. The single-device fields
-// (`uart`, `stlinkSerial`, `power.relayIndex`) are still accepted and fold
-// into the matching list when that list isn't set.
+// §8.2/§8.6: up to MAX_SLOTS each of UART adapters, DUT USB devices and
+// ST-Link probes per Client. The single-device fields (`uart`,
+// `stlinkSerial`) are still accepted and fold into the matching list when
+// that list isn't set. Power control left in an older file (hw.relays,
+// hw.power) is ignored: Clients no longer have any.
 function resolveHwConfig(hw){
-  const { uart, stlinkSerial, ...rest } = hw,
-    power = hw.power || {},
-    uarts = hw.uarts || (uart ? [uart] : []),
-    stlinks = hw.stlinks || (stlinkSerial ? [{ serial: stlinkSerial }] : []),
-    relays = hw.relays || (power.relayIndex !== undefined ? [{ channel: power.relayIndex }] : []);
+  const { uart, stlinkSerial, ...rest } = withoutPowerControl(hw).section,
+    uarts = rest.uarts || (uart ? [uart] : []),
+    stlinks = rest.stlinks || (stlinkSerial ? [{ serial: stlinkSerial }] : []);
 
   return {
     ...rest,
     uarts: resolveDeviceList('hw.uarts', uarts, 'uart'),
-    usbs: resolveDeviceList('hw.usbs', hw.usbs || [], 'usb'),
-    stlinks: resolveDeviceList('hw.stlinks', stlinks, 'stlink'),
-    relays: resolveRelayList('hw.relays', relays, power.baseUrl)
+    usbs: resolveDeviceList('hw.usbs', rest.usbs || [], 'usb'),
+    stlinks: resolveDeviceList('hw.stlinks', stlinks, 'stlink')
   };
 }
 
@@ -325,19 +313,13 @@ function readEditableConfig(configPath, type){
   const raw = JSON.parse(fs.readFileSync(configPath, 'utf8')) || {},
     section = { ...(raw[type] || {}) };
   if (type === 'hw'){
-    const { uart, stlinkSerial, ...rest } = section,
-      power = rest.power && typeof rest.power === 'object' ? { ...rest.power } : rest.power,
+    const { uart, stlinkSerial, ...rest } = withoutPowerControl(section).section,
       out = {
         ...rest,
         stlinks: asDeviceObjects(rest.stlinks || (stlinkSerial ? [{ serial: stlinkSerial }] : [])),
         uarts: asDeviceObjects(rest.uarts || (uart ? [uart] : [])),
-        usbs: asDeviceObjects(rest.usbs),
-        relays: (rest.relays || (power?.relayIndex !== undefined ? [power.relayIndex] : [])).map((r) => (typeof r === 'number' ? { channel: r } : r))
+        usbs: asDeviceObjects(rest.usbs)
       };
-    if (power){
-      delete power.relayIndex;
-    }
-    out.power = power || null;
     return publicClientConfig('hw', out);
   }
   return publicClientConfig(type, section);
@@ -357,6 +339,8 @@ function readShareableConfigFile(configPath){
 // top-level fields — filtered here again (never joinKey, coordinatorUrl,
 // name, this Client's id or paths), artifactory's token and tokenFile kept.
 function applyEditableConfig(configPath, type, section, fields = null){
+  // A revision saved before power control was removed may still carry it.
+  section = type === 'hw' ? withoutPowerControl(section).section : section;
   const { valid, errors } = validateClientConfig(type, section);
   if (!valid){
     throw new Error(errors.join('; '));
