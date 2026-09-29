@@ -14,9 +14,9 @@
 'use strict';
 
 const net = require('node:net'),
+  { execFile } = require('node:child_process'),
   Docker = require('dockerode'),
-  { shellJoin } = require('../downloader'),
-  { registryHost } = require('../docker-login');
+  { shellJoin } = require('../downloader');
 
 // §8.3 SW executor: runs a job's DUT image (--docker-image) in Docker, per
 // job — isolated network, read-only rootfs, fixed resource limits, always
@@ -37,16 +37,15 @@ class SwExecutor{
   // The DUT container: the job's own Docker image (--docker-image), run with
   // its default command, the job's downloads mounted read-only at
   // /downloads. Without one there's no container: the command runs on its
-  // own. `login`: the job's registry login (docker-login.js), used to pull
-  // from that registry.
-  async prepare(job, downloadsDir, { login = null } = {}){
+  // own.
+  async prepare(job, downloadsDir){
     const image = job.spec.image || null;
     if (!image){
       this.logShipper.push('emulator', 'no --docker-image — running the command without a DUT container');
       return;
     }
 
-    const ref = await this._pullIfMissing(image, login);
+    const ref = await this._pullIfMissing(image);
     this.containerName = `thub-${job.id}`;
 
     this.network = await this.docker.createNetwork({ Name: `thub-job-${job.id}`, Driver: 'bridge' });
@@ -88,17 +87,17 @@ class SwExecutor{
   // What prepare()/teardown() would do, as the equivalent docker CLI
   // commands (the Client uses the Docker API), without doing it (a dry run):
   // { steps, teardown, env, problems }.
-  plan(job, downloadsDir, { login = null } = {}){
+  plan(job, downloadsDir){
     const image = job.spec.image || null;
     if (!image){
       return { steps: ['no --docker-image — the command runs without a DUT container'], teardown: [], env: {}, problems: [] };
     }
-    const { label, ref, auth } = imageSource(image, login),
+    const { label, ref } = imageSource(image),
       container = `thub-${job.id}`,
       network = `thub-job-${job.id}`;
     return {
       steps: [
-        `docker pull ${ref}   # ${label}${auth ? ` as ${auth.username}` : ''}, unless already cached`,
+        `docker pull ${ref}   # ${label}, unless already cached`,
         `docker network create --driver bridge ${network}`,
         shellJoin([
           'docker', 'run', '-d', '--name', container, '--network', network,
@@ -115,15 +114,15 @@ class SwExecutor{
   }
 
   // The image as referenced, pulled unless it's already cached here.
-  async _pullIfMissing(image, login){
-    const { label, ref, auth } = imageSource(image, login);
+  async _pullIfMissing(image){
+    const { label, ref } = imageSource(image);
     if (await this._isCached(ref)){
       this.logShipper.push('emulator', `using cached image ${ref}`);
       return ref;
     }
-    this.logShipper.push('emulator', `pulling ${ref} from ${label}${auth ? ` as ${auth.username}` : ''}`);
+    this.logShipper.push('emulator', `pulling ${ref} from ${label}`);
     try {
-      await this._pull(ref, auth);
+      await this._pull(ref);
     }
     catch (err){
       throw new Error(`Image ${ref} not available from ${label}: ${err.message}`);
@@ -136,13 +135,17 @@ class SwExecutor{
     return images.length > 0;
   }
 
-  _pull(ref, auth){
+  // With the docker CLI, not the API: it uses the Docker logins of the
+  // Client's user (~/.docker/config.json — `docker login` once on the host,
+  // or left by a job's own command), which the API doesn't.
+  _pull(ref){
     return new Promise((resolve, reject) => {
-      this.docker.pull(ref, auth ? { authconfig: auth } : {}, (err, stream) => {
+      execFile('docker', ['pull', '-q', ref], { maxBuffer: 4 * 1024 * 1024 }, (err, stdout, stderr) => {
         if (err){
-          return reject(err);
+          const why = err.code === 'ENOENT' ? 'docker is not installed on this Client' : (stderr || err.message).trim().split('\n').slice(-2).join(' ');
+          return reject(new Error(why));
         }
-        this.docker.modem.followProgress(stream, (err2) => (err2 ? reject(err2) : resolve()));
+        resolve();
       });
     });
   }
@@ -178,17 +181,12 @@ class SwExecutor{
 }
 
 // Where `image` comes from: the registry host it names (`registry.lab:5000/
-// emu:1`), else Docker Hub (`alpine`, `library/ubuntu:24.04`). The job's
-// registry login (`login`, docker-login.js) is used for the registry it
-// names. Returns { label, ref, auth }.
-function imageSource(image, login = null){
+// emu:1`), else Docker Hub (`alpine`, `library/ubuntu:24.04`). Returns
+// { label, ref }. Pulled with the Client user's own Docker logins (_pull).
+function imageSource(image){
   const [first, ...rest] = image.split('/'),
-    host = rest.length > 0 && (first.includes('.') || first.includes(':') || first === 'localhost') ? first : null,
-    label = host ? `registry ${host}` : 'Docker Hub',
-    auth = login && registryHost(login.registry) === registryHost(host || 'docker.io')
-      ? { username: login.username, password: login.password, serveraddress: registryHost(login.registry) }
-      : null;
-  return { label, ref: image, auth };
+    host = rest.length > 0 && (first.includes('.') || first.includes(':') || first === 'localhost') ? first : null;
+  return { label: host ? `registry ${host}` : 'Docker Hub', ref: image };
 }
 
 function parseSize(s){
