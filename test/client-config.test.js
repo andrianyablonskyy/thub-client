@@ -26,15 +26,17 @@ function configFile(content){
   return file;
 }
 
-test('reports the hw section normalized: shorthand entries and legacy single-device fields spelled out', () => {
-  const file = configFile({ type: 'hw', hw: { stlinkSerial: 'ABC123', uart: 2, usbs: ['/dev/thub/dut1-usb', 3], power: { method: 'relay', relayIndex: 5 } } });
+test('reports the hw section normalized: shorthand entries and legacy single-device fields spelled out, power control dropped', () => {
+  const file = configFile({
+    type: 'hw',
+    hw: { stlinkSerial: 'ABC123', uart: 2, usbs: ['/dev/thub/dut1-usb', 3], relays: [{ channel: 0 }], power: { method: 'uhubctl', hub: '1-1', port: 2 } }
+  });
   assert.deepEqual(readEditableConfig(file, 'hw'), {
     stlinks: [{ serial: 'ABC123' }],
     uarts: [{ index: 2 }],
-    usbs: [{ path: '/dev/thub/dut1-usb' }, { index: 3 }],
-    relays: [{ channel: 5 }],
-    power: { method: 'relay' }
+    usbs: [{ path: '/dev/thub/dut1-usb' }, { index: 3 }]
   });
+  assert.deepEqual([loadConfig(file).hw.relays, loadConfig(file).hw.power], [undefined, undefined]); // an older file still loads, without them
 });
 
 test('reports the sw section without its secrets', () => {
@@ -85,4 +87,10 @@ test('import: the file\'s other fields written too; this Client keeps its URL, n
 
   assert.throws(() => applyEditableConfig(file, 'sw', { image: 'emu:3' }, { labels: 'x' }), /labels must be array/);
   assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).sw.image, 'emu:2'); // refused: nothing written
+});
+
+test('a dashboard revision that still carries power control is applied without it', () => {
+  const file = configFile({ type: 'hw', hw: { usbs: [] } });
+  applyEditableConfig(file, 'hw', { usbs: [{ index: 1 }], relays: [], power: { method: 'uhubctl', hub: '1-1', port: 2 } });
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')).hw, { usbs: [{ index: 1 }] });
 });

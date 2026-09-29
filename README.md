@@ -23,7 +23,7 @@ On a fresh install the service isn't started yet — the daemon would exit at on
 ## Ubuntu 26.04 host setup
 
 ```bash
-sudo apt install -y nodejs npm stlink-tools openocd uhubctl
+sudo apt install -y nodejs npm stlink-tools openocd
 # SW only: Docker — install it before thub-client so the service gets the
 # docker group (re-run the npm i -g below if you add it later)
 sudo apt install -y docker.io
@@ -72,7 +72,7 @@ Config resolution: `--config`/`-c` flag, or `THUB_CLIENT_CONFIG` env var, → `~
 
 `npm install -g` creates `~/.config/thub/client.json` for you if it doesn't already exist (see "Install" above) — a re-install never overwrites it. For a multi-instance setup (`dutN.json` files, above) it's just a starting point for your first/default instance.
 
-**Running several Clients on one host** — start one daemon process per config file, each pointed at its own `dutN.json`; every default path (`tokenFile`, `workDir`, `socketPath`, `pidFile`, `clientIdFile`) is already namespaced by the config file's own basename, so up to 8 instances (`dut0`..`dut7`, one per UART/ST-Link/relay channel) coexist with zero extra setup:
+**Running several Clients on one host** — start one daemon process per config file, each pointed at its own `dutN.json`; every default path (`tokenFile`, `workDir`, `socketPath`, `pidFile`, `clientIdFile`) is already namespaced by the config file's own basename, so up to 8 instances (`dut0`..`dut7`, one per UART/ST-Link) coexist with zero extra setup:
 
 ```bash
 THUB_CLIENT_CONFIG=/etc/thub/dut0.json thub-client-daemon &
@@ -105,7 +105,7 @@ If two instances instead share the exact same config file (told apart only by `n
 | `artifactory.allowedArtifactPrefixes` | No | `[]` | Artifactory URL prefixes: downloads from here get the Artifactory token. |
 | `sources.allowedPrefixes` | No | `[]` | Other places a job's `--download-file` files and `--git-repo` may come from (`"*"` = any), never with the token. A URL under neither list is refused; with both empty, anything is allowed (with the token). |
 
-**Capabilities.** At every registration (each start/restart) the Client reports what this config lets it drive: for HW each `hw.stlinks`/`uarts`/`usbs` device (path, ST-Link serial, UART baud rate, and whether the device node exists right now), `hw.relays` and `hw.power`; for SW the image, its source and the CPU/memory limits. The Coordinator's resource card lists them and flags a configured device that's missing. After plugging in or moving an adapter, restart the instance to refresh them.
+**Capabilities.** At every registration (each start/restart) the Client reports what this config lets it drive: for HW each `hw.stlinks`/`uarts`/`usbs` device (path, ST-Link serial, UART baud rate, and whether the device node exists right now); for SW the image, its source and the CPU/memory limits. The Coordinator's resource card lists them and flags a configured device that's missing. After plugging in or moving an adapter, restart the instance to refresh them.
 
 **Heartbeats** (every `heartbeatIntervalSec`) report the state, the host's network addresses, the host's uptime and the current activity (idle, running a job until it's fully finished including uploads, locked locally, or held for a self-update) with its duration — shown on the Coordinator's resource card.
 
@@ -113,7 +113,7 @@ If two instances instead share the exact same config file (told apart only by `n
 
 The image is looked up in order: `sw.registry` first, then Docker Hub only if `sw.allowDockerHub` is `true`, and if neither has it the job fails with the reason for each source. An image already cached on the host counts for its source. An image that names its own registry host (`other.example.com/emu:1`) is pulled from that host only. A plain-HTTP registry must also be in the Docker daemon's `insecure-registries`.
 
-**HW-only** (`type: hw`): up to 8 each of `hw.stlinks`, `hw.uarts`, `hw.usbs` (entries: udev index 1–8 → `/dev/thub/dut<N>-stlink|uart|usb`, a path, or `{ index | path, ... }`; ST-Link entries may give `serial`, UARTs `baudRate`; any of them `devpath` plus optional `vendorId`/`productId`/`subsystem` to get a udev symlink rule) and `hw.relays` (`{ channel: 0-7, baseUrl }`), plus `hw.power.method` (`uhubctl` or `relay`) and `hw.power.hub`/`.port` or `.baseUrl`. The legacy `hw.stlinkSerial`, `hw.uart` and `hw.power.relayIndex` still work.
+**HW-only** (`type: hw`): up to 8 each of `hw.stlinks`, `hw.uarts`, `hw.usbs` (entries: udev index 1–8 → `/dev/thub/dut<N>-stlink|uart|usb`, a path, or `{ index | path, ... }`; ST-Link entries may give `serial`, UARTs `baudRate`; any of them `devpath` plus optional `vendorId`/`productId`/`subsystem` to get a udev symlink rule). The legacy `hw.stlinkSerial` and `hw.uart` still work. Power control from older versions (`hw.relays`, `hw.power`) is ignored.
 
 Example SW config:
 
@@ -180,7 +180,7 @@ A cancel command or job timeout sends `SIGTERM` to the test process group, waits
 
 ### HW executor
 
-ST-Link via `st-flash`/`openocd`, UART via the `serialport` npm package, optional power cycling via `uhubctl` or a networked relay board's REST API (`hw.power.method: "relay"` — a **stub**, `src/relay-client.js`, pending the real board's API spec). Stable device paths (`/dev/thub/dut<N>-uart`, `/dev/thub/dut<N>-usb`, `/dev/thub/dut<N>-stlink`, N = 1–8) come from udev rules the Client generates from its own config.
+ST-Link via `st-flash`/`openocd`, UART via the `serialport` npm package. Stable device paths (`/dev/thub/dut<N>-uart`, `/dev/thub/dut<N>-usb`, `/dev/thub/dut<N>-stlink`, N = 1–8) come from udev rules the Client generates from its own config.
 
 **udev rules.** No udev setup at install time. On every start the Client writes `/etc/udev/rules.d/99-thub-<instance>.rules` from the `hw.stlinks`/`hw.uarts`/`hw.usbs` entries that have a `devpath` (the USB port path, `ATTRS{devpath}` in `udevadm info -a -n <device>`). It then reloads udev, re-triggers `usb`/`tty` devices and waits for them to settle, but only when the file actually changes. Defaults per kind: ST-Link `0483:3748` on `usb`, UART `0403:6001` on `tty`, USB `0483:5740` on `usb`; override them per entry with `vendorId`/`productId`/`subsystem`. Under systemd, the unit's `ExecStartPre=+` does this as root. Preview the rules with `thub-client [--config <path>] udev --print`, and apply them without a restart with `sudo thub-client [--config <path>] udev`. Upgrading from ≤ 1.0.17: move each `ATTR{devpath}` from the old `/etc/udev/rules.d/99-thub.rules` into the matching config entry, then delete that file. Nothing is flashed by the Client: the job's `--command` does it, with every device in its environment as `THUB_DUT_UART_<n>`/`THUB_DUT_USB_<n>`/`THUB_DUT_STLINK_<n>` (ST-Links by serial; `THUB_DUT_STLINK` = the first).
 

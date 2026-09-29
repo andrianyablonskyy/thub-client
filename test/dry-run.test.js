@@ -25,7 +25,7 @@ const JOB_DIR = '/var/lib/thub/j-1',
     artifactory: { token: 't', allowedArtifactPrefixes: ['https://art.lab/'] },
     sources: { allowedPrefixes: ['git@bitbucket.org:team/'] },
     sw: { image: 'dut-emulator:1', registry: 'registry.lab:5000' },
-    hw: { stlinks: [{ path: '/dev/thub/dut1-stlink' }], power: { method: 'uhubctl', hub: '1-1', port: 2 } }
+    hw: { stlinks: [{ path: '/dev/thub/dut1-stlink' }] }
   };
 
 test('shellQuote: bare when safe, single-quoted otherwise', () => {
@@ -58,6 +58,5 @@ test('dry run: downloads, the SW container, the command with its cwd and env, te
 test('dry run: HW steps, and what the Client would refuse', () => {
   const plan = dryRunPlan(job({ target: { type: 'hw', labels: [] }, downloads: [{ url: 'https://elsewhere.example/x.bin' }] }), JOB_DIR, config);
   assert.ok(plan.some((l) => l.startsWith('  udevadm info --query=property --name=/dev/thub/dut1-stlink')));
-  assert.ok(plan.includes('  uhubctl -l 1-1 -p 2 -a cycle'));
   assert.ok(plan.some((l) => l.startsWith('WOULD FAIL: https://elsewhere.example/x.bin isn\'t an allowed download source')));
 });

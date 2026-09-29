@@ -1,6 +1,6 @@
 /**
  * @file        packages/client/src/capabilities.js
- * @description What this Client can drive — its udev devices, relays and power control (HW) or emulator image
+ * @description What this Client can drive — its udev devices (HW) or emulator image
  *              and limits (SW) — reported to the Coordinator at registration (README §5.1, §10)
  *
  * @author      Andrian Yablonskyy
@@ -41,17 +41,12 @@ function describeTyped(config){
       }
     };
   }
-  const hw = config.hw || {},
-    power = hw.power || {};
+  const hw = config.hw || {};
   return {
     hw: {
       stlinks: (hw.stlinks || []).map((s) => device(s, s.serial ? { serial: s.serial } : {})),
       uarts: (hw.uarts || []).map((u) => device(u, u.baudRate ? { baudRate: u.baudRate } : {})),
-      usbs: (hw.usbs || []).map((u) => device(u)),
-      relays: (hw.relays || []).map((r) => ({ channel: r.channel, baseUrl: r.baseUrl || null })),
-      power: power.method
-        ? { method: power.method, ...(power.method === 'uhubctl' ? { hub: power.hub || null, port: power.port ?? null } : {}) }
-        : null
+      usbs: (hw.usbs || []).map((u) => device(u))
     }
   };
 }
