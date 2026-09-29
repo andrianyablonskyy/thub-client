@@ -24,7 +24,7 @@ function device(entry, extra = {}){
 }
 
 function describeCapabilities(config){
-  return { ...describeTyped(config), allowJobCommands: Boolean(config.allowJobCommands) };
+  return describeTyped(config);
 }
 
 function describeTyped(config){

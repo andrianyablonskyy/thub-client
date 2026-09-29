@@ -102,7 +102,8 @@ If two instances instead share the exact same config file (told apart only by `n
 | `heartbeatIntervalSec` | No | `10` | How often the daemon heartbeats. |
 | `longPollWaitSec` | No | `30` | How long each job long-poll waits before returning `204`. |
 | `artifactory.tokenFile` | No | — | Path to the Client's own read-only Artifactory token. |
-| `artifactory.allowedArtifactPrefixes` | No | `[]` | Job `firmware.url`/`tests.url` must start with one of these. |
+| `artifactory.allowedArtifactPrefixes` | No | `[]` | Artifactory URL prefixes: downloads from here get the Artifactory token. |
+| `sources.allowedPrefixes` | No | `[]` | Other places a job's `--download-file` files and `--git-repo` may come from (`"*"` = any), never with the token. A URL under neither list is refused; with both empty, anything is allowed (with the token). |
 
 **Capabilities.** At every registration (each start/restart) the Client reports what this config lets it drive: for HW each `hw.stlinks`/`uarts`/`usbs` device (path, ST-Link serial, UART baud rate, and whether the device node exists right now), `hw.relays` and `hw.power`; for SW the image, its source and the CPU/memory limits. The Coordinator's resource card lists them and flags a configured device that's missing. After plugging in or moving an adapter, restart the instance to refresh them.
 
@@ -169,23 +170,23 @@ It only ever installs `thub-client`, at a strictly validated version. Logs: `jou
 
 1. Receive the job from long-poll and `accept` it.
 2. Create a fresh workspace `<workDir>/<jobId>`.
-3. Download firmware and test package from Artifactory; verify `sha256`.
-4. **Prepare** the DUT through the executor (flash or start emulator).
-5. **Run** `./run-tests.sh --suite <suite> [--arg ...]` with environment variables describing the DUT, plus one `THUB_META_<KEY>` per job metadata field.
-6. Collect results (JUnit XML, console log, anything left in `artifacts/`).
+3. **Prepare the task's inputs**: clone `--git-repo` into `work/` at its ref and depth (else an empty `work/`), and download every `--download-file` into `downloads/`.
+4. **Prepare** the DUT through the executor: HW resolves ST-Link serials and captures UARTs (nothing is flashed — the command does that); SW starts the DUT container (`--docker-image` or `sw.image`, downloads at `/downloads`).
+5. **Run** the job's `--command` with `sh -c` in `work/`, `--arg` values as `"$@"`, and the environment: `THUB_DUT_*`, `THUB_DOWNLOAD_<n>`/`THUB_DOWNLOADS_DIR`/`THUB_DOWNLOADS`, `THUB_GIT_COMMIT`, `THUB_JOB_ID`, `THUB_SUITE`, `THUB_WORK_DIR`, one `THUB_META_<KEY>` per job metadata field. Its exit code is the verdict.
+6. Collect results (JUnit XML, console log, anything left in `work/artifacts/`).
 7. Upload artifacts, post the result, clean the workspace, report `IDLE`.
 
-A cancel command or job timeout sends `SIGTERM` to the test process group, waits 10s, then `SIGKILL`, and always runs executor teardown. If `spec.dryRun` is set, steps 2–6 are replaced with log lines describing what would have happened — no download, no executor, no `run-tests.sh`.
+A cancel command or job timeout sends `SIGTERM` to the test process group, waits 10s, then `SIGKILL`, and always runs executor teardown. If `spec.dryRun` is set, steps 2–6 are replaced with log lines describing what would have happened — no download or clone, no executor, no command.
 
 ### HW executor
 
 ST-Link via `st-flash`/`openocd`, UART via the `serialport` npm package, optional power cycling via `uhubctl` or a networked relay board's REST API (`hw.power.method: "relay"` — a **stub**, `src/relay-client.js`, pending the real board's API spec). Stable device paths (`/dev/thub/dut<N>-uart`, `/dev/thub/dut<N>-usb`, `/dev/thub/dut<N>-stlink`, N = 1–8) come from udev rules the Client generates from its own config.
 
-**udev rules.** No udev setup at install time. On every start the Client writes `/etc/udev/rules.d/99-thub-<instance>.rules` from the `hw.stlinks`/`hw.uarts`/`hw.usbs` entries that have a `devpath` (the USB port path, `ATTRS{devpath}` in `udevadm info -a -n <device>`). It then reloads udev, re-triggers `usb`/`tty` devices and waits for them to settle, but only when the file actually changes. Defaults per kind: ST-Link `0483:3748` on `usb`, UART `0403:6001` on `tty`, USB `0483:5740` on `usb`; override them per entry with `vendorId`/`productId`/`subsystem`. Under systemd, the unit's `ExecStartPre=+` does this as root. Preview the rules with `thub-client [--config <path>] udev --print`, and apply them without a restart with `sudo thub-client [--config <path>] udev`. Upgrading from ≤ 1.0.17: move each `ATTR{devpath}` from the old `/etc/udev/rules.d/99-thub.rules` into the matching config entry, then delete that file. The job's firmware is flashed through the first ST-Link; every device is passed to the test runner as `THUB_DUT_UART_<n>`/`THUB_DUT_USB_<n>`/`THUB_DUT_STLINK_<n>`.
+**udev rules.** No udev setup at install time. On every start the Client writes `/etc/udev/rules.d/99-thub-<instance>.rules` from the `hw.stlinks`/`hw.uarts`/`hw.usbs` entries that have a `devpath` (the USB port path, `ATTRS{devpath}` in `udevadm info -a -n <device>`). It then reloads udev, re-triggers `usb`/`tty` devices and waits for them to settle, but only when the file actually changes. Defaults per kind: ST-Link `0483:3748` on `usb`, UART `0403:6001` on `tty`, USB `0483:5740` on `usb`; override them per entry with `vendorId`/`productId`/`subsystem`. Under systemd, the unit's `ExecStartPre=+` does this as root. Preview the rules with `thub-client [--config <path>] udev --print`, and apply them without a restart with `sudo thub-client [--config <path>] udev`. Upgrading from ≤ 1.0.17: move each `ATTR{devpath}` from the old `/etc/udev/rules.d/99-thub.rules` into the matching config entry, then delete that file. Nothing is flashed by the Client: the job's `--command` does it, with every device in its environment as `THUB_DUT_UART_<n>`/`THUB_DUT_USB_<n>`/`THUB_DUT_STLINK_<n>` (ST-Links by serial; `THUB_DUT_STLINK` = the first).
 
 ### SW executor
 
-Pulls the emulator image from the local registry (`sw.registry`), then Docker Hub if `sw.allowDockerHub`, else fails (see "Configuration reference"). Runs the emulator (e.g. Renode, QEMU) in Docker via `dockerode`, one container per job, isolated network, always removed in teardown. The emulator's virtual UART is exposed as a TCP port the test runner connects to via `THUB_DUT_HOST`.
+Runs the job's own image (`--docker-image`, if `sw.allowJobImages`) or else `sw.image` (with `sw.cmd`, if set) as the DUT, the job's downloads mounted read-only at `/downloads`; with neither, the command runs without a container. Pulls from the local registry (`sw.registry`), then Docker Hub if `sw.allowDockerHub`, else fails (see "Configuration reference"). Runs the emulator (e.g. Renode, QEMU) in Docker via `dockerode`, one container per job, isolated network, always removed in teardown. The emulator's virtual UART is exposed as a TCP port the test runner connects to via `THUB_DUT_HOST`.
 
 ## Development
 

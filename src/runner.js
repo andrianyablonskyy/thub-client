@@ -17,7 +17,7 @@ const fs = require('node:fs'),
   path = require('node:path'),
   { spawn } = require('node:child_process'),
   { JOB_STATES } = require('@andrian.yablonskyy/thub-common'),
-  { downloadFirmware, fetchTests } = require('./downloader'),
+  { prepareTask } = require('./downloader'),
   { LogShipper } = require('./log-shipper'),
   { HwExecutor } = require('./executors/hw'),
   { SwExecutor } = require('./executors/sw');
@@ -90,30 +90,20 @@ class JobRunner{
 
     try {
       await this.client.post(`/jobs/${job.id}/accept`);
-      // Checked again here, not only by the Coordinator's scheduling: the
-      // setting may have been turned off since this Client registered.
-      if (job.spec.tests.command && !this.config.allowJobCommands){
-        throw new Error('This Client doesn\'t run job-supplied commands (--run) — set "allowJobCommands": true in its config');
-      }
 
-      // firmware.image (SW only): the job's own Docker image is the DUT —
-      // nothing to download, the executor pulls it.
-      let fwPath = null;
-      if (job.spec.firmware.url){
-        logShipper.push('runner', `downloading firmware ${job.spec.firmware.url}`);
-        fwPath = await downloadFirmware(job.spec, jobDir, this.config, { signal: this.abort.signal });
-      }
-      const { testsDir, commit } = await fetchTests(job.spec, jobDir, this.config, {
+      // The task's inputs first: its git checkout (where the command runs)
+      // and its downloaded files (README §8.1).
+      const task = await prepareTask(job.spec, jobDir, this.config, {
         signal: this.abort.signal,
         log: (line) => logShipper.push('runner', line)
       });
-      this.testsCommit = commit;
+      this.task = task;
       if (this.canceled){
         return this._bail(job, executor, logShipper);
       }
 
       logShipper.push('runner', 'preparing DUT');
-      await executor.prepare(job, job.spec.target.type === 'hw' || !fwPath ? fwPath : path.dirname(fwPath));
+      await executor.prepare(job, task.downloads.length ? task.downloadsDir : null);
       if (this.canceled){
         return this._bail(job, executor, logShipper);
       }
@@ -121,13 +111,13 @@ class JobRunner{
       await this.client.post(`/jobs/${job.id}/state`, { state: JOB_STATES.RUNNING });
       this._announce(JOB_STATES.RUNNING);
 
-      const exitCode = await this._runTests(job, testsDir, executor, logShipper);
+      const exitCode = await this._runCommand(job, task, executor, logShipper);
       if (this.canceled){
         return this._bail(job, executor, logShipper);
       }
 
-      const artifactsDir = path.join(testsDir, 'artifacts'),
-        resultFiles = collectResultFiles(testsDir, artifactsDir);
+      const artifactsDir = path.join(task.workDir, 'artifacts'),
+        resultFiles = collectResultFiles(task.workDir, artifactsDir);
       if (resultFiles.length){
         await this.client.postArtifacts(job.id, resultFiles);
       }
@@ -180,8 +170,8 @@ class JobRunner{
 
   // Dry run (§7.1): walks the same job lifecycle and API calls as a real
   // job — accept, PREPARING/RUNNING transitions, log lines, an artifact,
-  // a result — but never downloads firmware/tests, never touches an
-  // executor (no Docker, no ST-Link/serial), and never spawns run-tests.sh.
+  // a result — but never downloads or clones anything, never touches an
+  // executor (no Docker, no ST-Link/serial), and never runs the command.
   // Useful for proving the Coordinator<->Client plumbing end-to-end
   // without needing real hardware, a real emulator image, or a real
   // Artifactory.
@@ -197,15 +187,16 @@ class JobRunner{
         'runner',
         `[dry-run] target: ${job.spec.target.type} labels=${(job.spec.target.labels || []).join(',') || '(none)'}`
       );
-      logShipper.push(
-        'runner',
-        job.spec.firmware.image
-          ? `[dry-run] would run Docker image ${job.spec.firmware.image} as the DUT`
-          : `[dry-run] would download firmware ${job.spec.firmware.url}` +
-            (job.spec.firmware.sha256 ? ` (sha256 ${job.spec.firmware.sha256})` : '')
-      );
-      logShipper.push('runner', `[dry-run] would fetch tests ${describeTestSources(job.spec.tests)}`);
-      logShipper.push('runner', `[dry-run] would run: ${describeTestCommand(job.spec.tests)}`);
+      for (const d of job.spec.downloads || []){
+        logShipper.push('runner', `[dry-run] would download ${d.url}`);
+      }
+      if (job.spec.git){
+        logShipper.push('runner', `[dry-run] would clone ${describeGit(job.spec.git)}`);
+      }
+      if (job.spec.image){
+        logShipper.push('runner', `[dry-run] would run Docker image ${job.spec.image} as the DUT`);
+      }
+      logShipper.push('runner', `[dry-run] would run: ${describeCommand(job.spec)}`);
       for (const [key, value]of Object.entries(metaToEnv(job.spec.meta))){
         logShipper.push('runner', `[dry-run] ${key}=${value}`);
       }
@@ -250,26 +241,25 @@ class JobRunner{
     }
   }
 
-  // The job's own command (tests.command, via `sh -c` with --arg values as
-  // "$@") if given, else the sources' run-tests.sh --suite <suite> <args>.
-  _runTests(job, testsDir, executor, logShipper){
+  // The task's entry point: `sh -c <command>` in the work directory, --arg
+  // values as "$@", with the job's environment — the DUT (THUB_DUT_*), its
+  // downloads (THUB_DOWNLOADS_DIR, THUB_DOWNLOAD_<n>, THUB_DOWNLOADS), the
+  // checkout's commit, the suite and --meta values.
+  _runCommand(job, task, executor, logShipper){
     return new Promise((resolve, reject) => {
-      const { command, suite = 'default', args = [] } = job.spec.tests,
-        entry = path.join(testsDir, 'run-tests.sh');
-      if (!command && !fs.existsSync(entry)){
-        return reject(new Error('The test sources have no run-tests.sh — add one, or start them with --run "<command>"'));
-      }
-      logShipper.push('runner', `running: ${describeTestCommand(job.spec.tests)}`);
-      const [cmd, argv] = command ? ['sh', ['-c', command, 'thub-job', ...args]] : [entry, ['--suite', suite, ...args]];
-      this.child = spawn(cmd, argv, {
-        cwd: testsDir,
+      const { command, suite = 'default', args = [] } = job.spec;
+      logShipper.push('runner', `running: ${describeCommand(job.spec)}`);
+      this.child = spawn('sh', ['-c', command, 'thub-job', ...args], {
+        cwd: task.workDir,
         env: {
           ...process.env,
           ...executor.envFor(),
           ...metaToEnv(job.spec.meta),
+          ...downloadsEnv(task),
           THUB_JOB_ID: job.id,
           THUB_SUITE: suite,
-          ...(this.testsCommit ? { THUB_TESTS_COMMIT: this.testsCommit } : {})
+          THUB_WORK_DIR: task.workDir,
+          ...(task.commit ? { THUB_GIT_COMMIT: task.commit } : {})
         }
       });
       this.child.stdout.on('data', (d) => logShipper.push('runner', d.toString('utf8').trimEnd()));
@@ -283,24 +273,30 @@ class JobRunner{
   }
 }
 
-function describeTestSources(tests){
-  if (!tests.git){
-    return tests.url;
-  }
-  const { branch, tag, commit } = tests.git,
-    ref = branch ? `branch ${branch}` : tag ? `tag ${tag}` : commit ? `commit ${commit}` : 'default branch';
-  return `${tests.git.url} (${ref})`;
+function describeGit(git){
+  return `${git.url} (${git.ref || 'default branch'}, depth ${git.depth ?? 1})`;
 }
 
-function describeTestCommand(tests){
-  const args = tests.args || [];
-  return tests.command
-    ? `sh -c ${JSON.stringify(tests.command)}${args.length ? ` (args: ${args.join(' ')})` : ''}`
-    : `run-tests.sh --suite ${tests.suite || 'default'}${args.length ? ' ' + args.join(' ') : ''}`;
+function describeCommand(spec){
+  const args = spec.args || [];
+  return `sh -c ${JSON.stringify(spec.command)}${args.length ? ` (args: ${args.join(' ')})` : ''}`;
+}
+
+// THUB_DOWNLOAD_<n> (1-based, the job's order), THUB_DOWNLOADS (all of them,
+// one per line) and THUB_DOWNLOADS_DIR.
+function downloadsEnv(task){
+  if (!task.downloads.length){
+    return {};
+  }
+  return {
+    THUB_DOWNLOADS_DIR: task.downloadsDir,
+    THUB_DOWNLOADS: task.downloads.join('\n'),
+    ...Object.fromEntries(task.downloads.map((p, i) => [`THUB_DOWNLOAD_${i + 1}`, p]))
+  };
 }
 
 // Exposes `--meta key=value` from the Agent (§7.1 — CI job id, git repo/
-// branch/sha/tag, etc.) to run-tests.sh as THUB_META_<KEY> env vars, e.g.
+// branch/sha/tag, etc.) to the command as THUB_META_<KEY> env vars, e.g.
 // `--meta ciJobId=123` -> THUB_META_CI_JOB_ID=123.
 function metaToEnv(meta){
   const env = {};
@@ -359,9 +355,10 @@ function dryRunReport(job){
     `job:      ${job.id}\n` +
     (job.spec.user ? `user:     ${job.spec.user}\n` : '') +
     `target:   ${job.spec.target.type} labels=${(job.spec.target.labels || []).join(',') || '(none)'}\n` +
-    `${job.spec.firmware.image ? `image: ${job.spec.firmware.image}` : `firmware: ${job.spec.firmware.url}`}\n` +
-    `tests:    ${describeTestSources(job.spec.tests)} (suite=${job.spec.tests.suite || 'default'})\n` +
-    `run:      ${describeTestCommand(job.spec.tests)}\n` +
+    `downloads: ${(job.spec.downloads || []).map((d) => d.url).join(', ') || '(none)'}\n` +
+    `git:      ${job.spec.git ? describeGit(job.spec.git) : '(none)'}\n` +
+    `image:    ${job.spec.image || '(Client default)'}\n` +
+    `command:  ${describeCommand(job.spec)} (suite=${job.spec.suite || 'default'})\n` +
     `meta:     ${JSON.stringify(job.spec.meta || {})}\n`
   );
 }
