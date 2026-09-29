@@ -1,6 +1,6 @@
 /**
  * @file        packages/client/src/downloader.js
- * @description Fetches a job's firmware and test sources (archive or git repository), under the Client's download
+ * @description Prepares a task's inputs — its downloaded files and git checkout — under the Client's download
  *              policy: the Artifactory token only goes to allowedArtifactPrefixes (README §8.1, §12)
  *
  * @author      Andrian Yablonskyy
@@ -16,10 +16,9 @@
 
 const fs = require('node:fs'),
   path = require('node:path'),
-  crypto = require('node:crypto'),
   { execFile } = require('node:child_process');
 
-// Git transports allowed for test sources — never ext:: (runs a command)
+// Git transports allowed for a task's repository — never ext:: (runs a command)
 // or file:// (reads this host). Matches the job spec's own check.
 const GIT_ALLOW_PROTOCOL = 'http:https:ssh:git',
 
@@ -62,10 +61,6 @@ async function fetchToFile(url, destPath, { token, signal } = {}){
   return destPath;
 }
 
-function sha256File(filePath){
-  return crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
-}
-
 function run(cmd, args, { signal, env, cwd } = {}){
   return new Promise((resolve, reject) => {
     execFile(cmd, args, { signal, env: env || process.env, cwd, maxBuffer: 16 * 1024 * 1024 }, (err, stdout, stderr) => {
@@ -80,69 +75,73 @@ function run(cmd, args, { signal, env, cwd } = {}){
   });
 }
 
-// `cfg`: the Client config (artifactory + sources).
-async function downloadFirmware(spec, jobDir, cfg, { signal } = {}){
-  const { token } = downloadAccess(spec.firmware.url, cfg),
-    dest = path.join(jobDir, 'fw', path.basename(new URL(spec.firmware.url).pathname) || 'app.bin');
-  await fetchToFile(spec.firmware.url, dest, { token, signal });
-  if (spec.firmware.sha256){
-    const actual = sha256File(dest);
-    if (actual !== spec.firmware.sha256){
-      throw new Error(`Firmware sha256 mismatch: expected ${spec.firmware.sha256}, got ${actual}`);
+// A safe, unique file name for each download, from its URL's last path
+// segment (app.bin), numbered when several share a name (2-app.bin).
+function downloadNames(urls){
+  const seen = new Map();
+  return urls.map((url, i) => {
+    let base;
+    try {
+      base = decodeURIComponent(path.basename(new URL(url).pathname));
     }
-  }
-  return dest;
+    catch {
+      base = '';
+    }
+    base = base.replace(/[^A-Za-z0-9._+-]/g, '_').replace(/^\.+/, '') || `download-${i + 1}`;
+    const n = (seen.get(base) || 0) + 1;
+    seen.set(base, n);
+    return n === 1 ? base : `${n}-${base}`;
+  });
 }
 
-// Unpacks by content, not by the URL's extension: zip by its magic bytes,
-// anything else via tar, which detects gzip/bzip2/xz compression itself.
-async function extractArchive(archive, destDir, { signal } = {}){
+// --download-file: each URL into `destDir`, before the command runs.
+// Returns the absolute paths, in the job's order.
+async function downloadFiles(downloads, destDir, cfg, { signal, log = () => {} } = {}){
+  const urls = (downloads || []).map((d) => d.url),
+    names = downloadNames(urls),
+    paths = [];
   fs.mkdirSync(destDir, { recursive: true });
-  const head = Buffer.alloc(4),
-    fd = fs.openSync(archive, 'r');
-  fs.readSync(fd, head, 0, 4, 0);
-  fs.closeSync(fd);
-  try {
-    if (head.toString('latin1') === 'PK\x03\x04'){
-      await run('unzip', ['-q', '-o', archive, '-d', destDir], { signal });
-    }
-    else {
-      await run('tar', ['-xf', archive, '-C', destDir], { signal });
-    }
+  for (const [i, url]of urls.entries()){
+    const { token } = downloadAccess(url, cfg),
+      dest = path.join(destDir, names[i]);
+    log(`downloading ${url} -> ${path.join(path.basename(destDir), names[i])}`);
+    await fetchToFile(url, dest, { token, signal });
+    paths.push(dest);
   }
-  catch (err){
-    throw new Error(`Extracting test package failed: ${err.message}`);
-  }
+  return paths;
 }
 
-// Fetches exactly the requested revision, shallowly where the server
-// allows it. Refs are validated by the job spec (never an option-like
-// "-..."), the transport is restricted, and git never prompts.
-async function fetchGitSources(git, destDir, cfg, { signal, log = () => {} } = {}){
+const looksLikeCommit = (ref) => /^[0-9a-fA-F]{7,40}$/.test(ref || '');
+
+// --git-repo <url> [ref] --depth <n>: clone into `destDir` at `ref` (branch,
+// tag or commit; default: the default branch), `depth` commits deep (0:
+// full history). Where the server can't do that (no shallow support, a
+// short or unadvertised commit), falls back to a full fetch. Refs are
+// validated by the job spec (never an option-like "-..."), the transport is
+// restricted, and git never prompts.
+async function cloneRepo(git, destDir, cfg, { signal, log = () => {} } = {}){
   downloadAccess(git.url, cfg);
   const env = { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_ALLOW_PROTOCOL },
     g = (...args) => run('git', ['-C', destDir, ...args], { signal, env }),
-    [refLabel, fetchRef] = git.branch
-      ? [`branch ${git.branch}`, `refs/heads/${git.branch}`]
-      : git.tag ? [`tag ${git.tag}`, `refs/tags/${git.tag}`] : git.commit ? [`commit ${git.commit}`, git.commit] : ['default branch', 'HEAD'];
+    ref = git.ref || null,
+    fetchRef = ref || 'HEAD',
+    depth = Number.isInteger(git.depth) ? git.depth : 1,
+    label = ref ? `ref ${ref}` : 'default branch';
 
   fs.mkdirSync(destDir, { recursive: true });
   await g('init', '-q');
   await g('remote', 'add', 'origin', git.url);
-  log(`fetching ${git.url} (${refLabel})`);
+  log(`cloning ${git.url} (${label}${depth ? `, depth ${depth}` : ', full history'})`);
   try {
-    await g('fetch', '-q', '--depth', '1', 'origin', fetchRef);
+    await g('fetch', '-q', ...(depth ? ['--depth', String(depth)] : []), 'origin', fetchRef);
     await g('checkout', '-q', '--detach', 'FETCH_HEAD');
   }
   catch (err){
-    // Not every server does shallow fetches (e.g. git's plain "dumb" HTTP),
-    // and a short or unadvertised commit can't be fetched by name: fall
-    // back to a full fetch — of the ref, or of everything for a commit.
-    log(`shallow fetch not possible (${err.message}) — fetching the full history`);
+    log(`fetching ${label} that way failed (${err.message}) — fetching the full history`);
     try {
-      if (git.commit){
+      if (looksLikeCommit(ref)){
         await g('fetch', '-q', '--tags', 'origin', '+refs/heads/*:refs/remotes/origin/*');
-        await g('checkout', '-q', '--detach', git.commit);
+        await g('checkout', '-q', '--detach', ref);
       }
       else {
         await g('fetch', '-q', 'origin', fetchRef);
@@ -150,27 +149,25 @@ async function fetchGitSources(git, destDir, cfg, { signal, log = () => {} } = {
       }
     }
     catch (e){
-      throw new Error(`git: can't get ${refLabel} from ${git.url}: ${e.message}`);
+      throw new Error(`git: can't get ${label} from ${git.url}: ${e.message}`);
     }
   }
   const commit = await g('rev-parse', 'HEAD');
-  log(`test sources at commit ${commit}`);
+  log(`checked out commit ${commit}`);
   return commit;
 }
 
-// Test sources into <jobDir>/tests: an archive (tests.url) or a git
-// repository (tests.git). Returns { testsDir, commit } (commit: git only).
-async function fetchTests(spec, jobDir, cfg, { signal, log = () => {} } = {}){
-  const testsDir = path.join(jobDir, 'tests');
-  if (spec.tests.git){
-    return { testsDir, commit: await fetchGitSources(spec.tests.git, testsDir, cfg, { signal, log }) };
-  }
-  const { token } = downloadAccess(spec.tests.url, cfg),
-    archive = path.join(jobDir, 'tests.archive');
-  log(`downloading tests ${spec.tests.url}`);
-  await fetchToFile(spec.tests.url, archive, { token, signal });
-  await extractArchive(archive, testsDir, { signal });
-  return { testsDir, commit: null };
+// A task's inputs, before its command runs: `<jobDir>/work` — the git
+// checkout, or an empty directory — is where the command runs; the
+// downloads go to `<jobDir>/downloads`, apart from the checkout so they
+// can't clobber its files. Returns { workDir, downloadsDir, downloads, commit }.
+async function prepareTask(spec, jobDir, cfg, { signal, log } = {}){
+  const workDir = path.join(jobDir, 'work'),
+    downloadsDir = path.join(jobDir, 'downloads'),
+    commit = spec.git ? await cloneRepo(spec.git, workDir, cfg, { signal, log }) : null;
+  fs.mkdirSync(workDir, { recursive: true });
+  const downloads = await downloadFiles(spec.downloads, downloadsDir, cfg, { signal, log });
+  return { workDir, downloadsDir, downloads, commit };
 }
 
-module.exports = { downloadFirmware, fetchTests, fetchGitSources, extractArchive, downloadAccess };
+module.exports = { prepareTask, downloadFiles, cloneRepo, downloadNames, downloadAccess };

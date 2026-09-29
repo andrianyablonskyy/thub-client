@@ -49,24 +49,14 @@ class HwExecutor{
     this.serialPorts = [];
   }
 
-  // The job's single firmware image goes to the first ST-Link (hw.stlinks[0]);
-  // every probe is still exposed to the test runner via envFor().
-  async prepare(job, firmwarePath){
-    const { flashAddress } = job.spec.firmware,
-      addr = flashAddress || '0x08000000',
-      stlinks = this.config.stlinks || [],
-      serial = stlinks.length ? await this._stlinkSerial(stlinks[0]) : null,
-      args = serial
-        ? ['--serial', serial, '--reset', 'write', firmwarePath, addr]
-        : ['--reset', 'write', firmwarePath, addr];
-
-    this.logShipper.push('flash', `st-flash ${args.join(' ')}`);
-    const output = await run('st-flash', args);
-    this.logShipper.push('flash', output);
-    // Resolve the remaining probes' serials now so envFor() (sync) has them.
-    for (const stlink of stlinks.slice(1)){
+  // Nothing is flashed automatically: the job's --command does that (e.g.
+  // `st-flash --serial "$THUB_DUT_STLINK" --reset write "$THUB_DOWNLOAD_1"
+  // 0x08000000`). Here: resolve every ST-Link's serial so envFor() (sync)
+  // has them, and start capturing the UARTs.
+  async prepare(){
+    for (const stlink of this.config.stlinks || []){
       await this._stlinkSerial(stlink).catch(
-        (err) => this.logShipper.push('flash', `ST-Link serial lookup failed: ${err.message}`)
+        (err) => this.logShipper.push('runner', `ST-Link serial lookup failed for ${stlink.path}: ${err.message}`)
       );
     }
     await this._openUarts();

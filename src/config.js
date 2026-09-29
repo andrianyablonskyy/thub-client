@@ -114,15 +114,10 @@ function loadConfig(configPath = process.env.THUB_CLIENT_CONFIG, overrides = {})
       rebootScheduleFile: raw.rebootScheduleFile || path.join(varDir, instance, 'reboot-schedule.json'),
       rebootRequestFile: raw.rebootRequestFile || path.join(varDir, 'reboot-request.json'),
       artifactory: resolveArtifactoryConfig(raw.artifactory || {}),
-      // Other download sources for firmware and test sources (archives, git
-      // repos) — URL prefixes, "*" for any. Never sent the Artifactory token
+      // Other places a task's --download-file files and --git-repo may come
+      // from — URL prefixes, "*" for any. Never sent the Artifactory token
       // (downloader.js downloadAccess).
       sources: { allowedPrefixes: Array.isArray(raw.sources?.allowedPrefixes) ? raw.sources.allowedPrefixes : [] },
-      // Run a job's own start command (`thub run --run "..."`, tests.command)
-      // instead of the sources' run-tests.sh. Off by default: it gives anyone
-      // holding an agent token a shell on this host, as the Client's user.
-      // Reported to the Coordinator, which only schedules such jobs here when on.
-      allowJobCommands: raw.allowJobCommands === true,
       hw,
       sw: resolveSwConfig(raw.sw || {}),
       heartbeatIntervalSec: raw.heartbeatIntervalSec || 10,
@@ -279,11 +274,15 @@ function resolveSwConfig(sw){
     }
     registryAuth = { username: auth.username, password, serveraddress: registry };
   }
-  // allowJobImages: run a job's own Docker image (`thub run --type sw --image
-  // alpine`, spec firmware.image) instead of sw.image. Off by default: it lets
-  // anyone with an agent token pick the code this host runs (in the usual
-  // sandboxed container). Reported to the Coordinator, which only schedules
-  // such jobs here when it's on.
+  // allowJobImages: run a job's own Docker image (`thub run --type sw
+  // --docker-image alpine`, spec `image`) instead of sw.image. Off by default:
+  // it lets anyone with an agent token pick the DUT image this host runs (in
+  // the usual sandboxed container). Reported to the Coordinator, which only
+  // schedules such jobs here when it's on. cmd: the container command for
+  // sw.image (e.g. ["--firmware", "/downloads/app.bin"]); default: the image's own.
+  if (sw.cmd !== undefined && !(Array.isArray(sw.cmd) && sw.cmd.every((a) => typeof a === 'string'))){
+    throw new Error('sw.cmd must be an array of strings');
+  }
   return {
     ...sw,
     registry: registry || null,

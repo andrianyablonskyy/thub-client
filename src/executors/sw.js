@@ -29,18 +29,20 @@ class SwExecutor{
     this.containerName = null;
   }
 
-  // Two kinds of SW job: a firmware file (`fwDir`) run by this Client's own
-  // emulator image (sw.image, started as `--firmware /fw/app.bin`), or the
-  // job's own Docker image (firmware.image) — run as-is with its default
-  // command, only if sw.allowJobImages. Same sandbox either way.
-  async prepare(job, fwDir){
-    const jobImage = job.spec.firmware?.image || null,
+  // The DUT container: the job's own Docker image (--docker-image; only if
+  // sw.allowJobImages) run with its default command, else this Client's
+  // sw.image with sw.cmd (if set). The job's downloads are mounted read-only
+  // at /downloads. With neither image, there's no container: the command
+  // runs on its own. Same sandbox either way.
+  async prepare(job, downloadsDir){
+    const jobImage = job.spec.image || null,
       image = jobImage || this.config.image;
     if (jobImage && !this.config.allowJobImages){
       throw new Error(`This Client doesn't run job-supplied Docker images (${jobImage}) — set sw.allowJobImages: true in its config`);
     }
     if (!image){
-      throw new Error('sw.image is not configured on this Client');
+      this.logShipper.push('emulator', 'no Docker image (job or sw.image) — running the command without a DUT container');
+      return;
     }
 
     const ref = await this._resolveImage(image);
@@ -51,7 +53,7 @@ class SwExecutor{
     this.container = await this.docker.createContainer({
       Image: ref,
       name: this.containerName,
-      ...(jobImage ? {} : { Cmd: ['--firmware', '/fw/app.bin'] }),
+      ...(!jobImage && Array.isArray(this.config.cmd) ? { Cmd: this.config.cmd.map(String) } : {}),
       ExposedPorts: { '5555/tcp': {} },
       HostConfig: {
         AutoRemove: false,
@@ -59,7 +61,7 @@ class SwExecutor{
         Memory: parseSize(this.config.memory || '2g'),
         NanoCpus: (this.config.cpus || 2) * 1e9,
         ReadonlyRootfs: true,
-        ...(fwDir ? { Binds: [`${fwDir}:/fw:ro`] } : {}),
+        ...(downloadsDir ? { Binds: [`${downloadsDir}:/downloads:ro`] } : {}),
         PortBindings: { '5555/tcp': [{ HostIp: '127.0.0.1', HostPort: '0' }] }
       }
     });
@@ -75,13 +77,10 @@ class SwExecutor{
       try {
         await waitForTcp('127.0.0.1', Number(this.hostPort), 10_000);
       }
-      catch (err){
-        // The emulator image must serve on 5555; an arbitrary job image
-        // needn't — its tests may use THUB_DUT_CONTAINER instead.
-        if (!jobImage){
-          throw err;
-        }
-        this.logShipper.push('emulator', `nothing listening on port 5555 in ${ref} — tests can reach it via THUB_DUT_CONTAINER=${this.containerName}`);
+      catch {
+        // Not every image serves on 5555; the command can still reach the
+        // container via THUB_DUT_CONTAINER (docker exec / logs).
+        this.logShipper.push('emulator', `nothing listening on port 5555 in ${ref} — the command can use THUB_DUT_CONTAINER=${this.containerName}`);
       }
     }
   }
@@ -145,7 +144,7 @@ class SwExecutor{
   envFor(){
     return {
       ...(this.hostPort ? { THUB_DUT_HOST: `127.0.0.1:${this.hostPort}` } : {}),
-      // For `docker exec`/`docker logs` from run-tests.sh.
+      // For `docker exec`/`docker logs` from the job's command.
       ...(this.containerName ? { THUB_DUT_CONTAINER: this.containerName } : {})
     };
   }

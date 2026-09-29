@@ -1,6 +1,6 @@
 /**
  * @file        packages/client/test/sw-executor.test.js
- * @description Tests: SW executor container setup for a firmware file vs a job-supplied Docker image
+ * @description Tests: SW executor container setup — the Client's own image vs a job-supplied one, downloads mount
  *
  * @author      Andrian Yablonskyy
  * @copyright   Copyright (c) 2026 Andrian Yablonskyy. All rights reserved.
@@ -45,21 +45,21 @@ function executor(sw){
   return { ex, docker };
 }
 
-const job = (firmware) => ({ id: 'M-00001', spec: { target: { type: 'sw' }, firmware } });
+const job = (image) => ({ id: 'M-00001', spec: { target: { type: 'sw' }, command: 'x', ...(image ? { image } : {}) } });
 
-test('a firmware file runs in the Client\'s own emulator image with the file mounted', async () => {
-  const { ex, docker } = executor({ image: 'dut-emulator:1' });
-  await ex.prepare(job({ url: 'https://x/app.bin' }), '/work/fw');
+test('no job image: the Client\'s own sw.image, with sw.cmd and the downloads mounted read-only', async () => {
+  const { ex, docker } = executor({ image: 'dut-emulator:1', cmd: ['--firmware', '/downloads/app.bin'] });
+  await ex.prepare(job(), '/job/downloads');
   assert.equal(docker.calls.created.Image, 'dut-emulator:1');
-  assert.deepEqual(docker.calls.created.Cmd, ['--firmware', '/fw/app.bin']);
-  assert.deepEqual(docker.calls.created.HostConfig.Binds, ['/work/fw:/fw:ro']);
+  assert.deepEqual(docker.calls.created.Cmd, ['--firmware', '/downloads/app.bin']);
+  assert.deepEqual(docker.calls.created.HostConfig.Binds, ['/job/downloads:/downloads:ro']);
   assert.equal(docker.calls.created.HostConfig.ReadonlyRootfs, true);
   assert.equal(ex.envFor().THUB_DUT_CONTAINER, 'thub-M-00001');
 });
 
-test('a job image runs as-is (its own command, no mount), same sandbox, when allowed', async () => {
-  const { ex, docker } = executor({ image: 'dut-emulator:1', allowJobImages: true });
-  await ex.prepare(job({ image: 'alpine' }), null);
+test('a job image runs as-is (its own command), same sandbox, when allowed', async () => {
+  const { ex, docker } = executor({ image: 'dut-emulator:1', cmd: ['--x'], allowJobImages: true });
+  await ex.prepare(job('alpine'), null);
   assert.equal(docker.calls.created.Image, 'alpine');
   assert.equal(docker.calls.created.Cmd, undefined);
   assert.equal(docker.calls.created.HostConfig.Binds, undefined);
@@ -67,8 +67,13 @@ test('a job image runs as-is (its own command, no mount), same sandbox, when all
   assert.equal(docker.calls.created.HostConfig.NetworkMode, 'net1');
 });
 
-test('a job image is refused unless sw.allowJobImages', async () => {
-  const { ex, docker } = executor({ image: 'dut-emulator:1' });
-  await assert.rejects(ex.prepare(job({ image: 'alpine' }), null), /allowJobImages/);
-  assert.equal(docker.calls.created, null);
+test('a job image is refused unless sw.allowJobImages; no image at all means no container', async () => {
+  const refused = executor({ image: 'dut-emulator:1' });
+  await assert.rejects(refused.ex.prepare(job('alpine'), null), /allowJobImages/);
+  assert.equal(refused.docker.calls.created, null);
+
+  const none = executor({});
+  await none.ex.prepare(job(), null);
+  assert.equal(none.docker.calls.created, null);
+  assert.deepEqual(none.ex.envFor(), {});
 });
