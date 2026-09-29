@@ -14,6 +14,7 @@
 'use strict';
 
 const fs = require('node:fs'),
+  { validateClientConfig, publicClientConfig, CLIENT_CONFIG_PRIVATE_FIELDS } = require('@andrian.yablonskyy/thub-common'),
   os = require('node:os'),
   path = require('node:path'),
   crypto = require('node:crypto');
@@ -112,6 +113,8 @@ function loadConfig(configPath = process.env.THUB_CLIENT_CONFIG, overrides = {})
       // sent by the Coordinator, and the host-wide request the root
       // thub-client-reboot.path unit watches.
       rebootScheduleFile: raw.rebootScheduleFile || path.join(varDir, instance, 'reboot-schedule.json'),
+      // The dashboard config revision (Config tab) this instance has applied.
+      configRevisionFile: raw.configRevisionFile || path.join(varDir, instance, 'config-revision.json'),
       rebootRequestFile: raw.rebootRequestFile || path.join(varDir, 'reboot-request.json'),
       artifactory: resolveArtifactoryConfig(raw.artifactory || {}),
       // Other places a task's --download-file files and --git-repo may come
@@ -306,6 +309,83 @@ function resolveArtifactoryConfig(artifactory){
   }
 }
 
+// ---- Capabilities edited from the dashboard (README §10, Config tab) ----
+
+// Device list entries as the dashboard sees them: always objects — the
+// shorthand forms (a udev index number, a path string) spelled out.
+const asDeviceObjects = (list) => (Array.isArray(list) ? list : []).map((e) =>
+  typeof e === 'number' ? { index: e } : typeof e === 'string' ? { path: e } : e);
+
+// The editable part of this Client's config: its `hw` or `sw` section as in
+// the file, normalized (shorthand entries, legacy single-device fields) and
+// without secrets. Reported at registration.
+function readEditableConfig(configPath, type){
+  const raw = JSON.parse(fs.readFileSync(configPath, 'utf8')) || {},
+    section = { ...(raw[type] || {}) };
+  if (type === 'hw'){
+    const { uart, stlinkSerial, ...rest } = section,
+      power = rest.power && typeof rest.power === 'object' ? { ...rest.power } : rest.power,
+      out = {
+        ...rest,
+        stlinks: asDeviceObjects(rest.stlinks || (stlinkSerial ? [{ serial: stlinkSerial }] : [])),
+        uarts: asDeviceObjects(rest.uarts || (uart ? [uart] : [])),
+        usbs: asDeviceObjects(rest.usbs),
+        relays: (rest.relays || (power?.relayIndex !== undefined ? [power.relayIndex] : [])).map((r) => (typeof r === 'number' ? { channel: r } : r))
+      };
+    if (power){
+      delete power.relayIndex;
+    }
+    out.power = power || null;
+    return publicClientConfig('hw', out);
+  }
+  return publicClientConfig(type, section);
+}
+
+// Applies a dashboard edit to the config file: validated (the shared schema,
+// then exactly as loadConfig would resolve it), merged with the section's
+// private fields (e.g. sw.registryAuth, never sent to the Coordinator),
+// legacy single-device fields dropped, and written atomically. Throws with a
+// readable reason if it can't be applied.
+function applyEditableConfig(configPath, type, section){
+  const { valid, errors } = validateClientConfig(type, section);
+  if (!valid){
+    throw new Error(errors.join('; '));
+  }
+  const raw = JSON.parse(fs.readFileSync(configPath, 'utf8')) || {},
+    current = raw[type] || {},
+    next = { ...section };
+  for (const key of CLIENT_CONFIG_PRIVATE_FIELDS[type] || []){
+    if (current[key] !== undefined){
+      next[key] = current[key];
+    }
+  }
+  if (type === 'hw'){
+    resolveHwConfig(next);
+  }
+  else {
+    resolveSwConfig(next);
+  }
+  const mode = fs.statSync(configPath).mode & 0o777,
+    tmp = `${configPath}.tmp-${process.pid}`;
+  fs.writeFileSync(tmp, JSON.stringify({ ...raw, [type]: next }, null, 2) + '\n', { mode });
+  fs.renameSync(tmp, configPath);
+}
+
+function readAppliedConfigRevision(file){
+  try {
+    const { revision, error } = JSON.parse(fs.readFileSync(file, 'utf8'));
+    return { revision: Number.isInteger(revision) ? revision : 0, error: error || null };
+  }
+  catch {
+    return { revision: 0, error: null };
+  }
+}
+
+function writeAppliedConfigRevision(file, revision, error = null){
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify({ revision, error, at: new Date().toISOString() }) + '\n');
+}
+
 function saveConfigField(configPath, key, value){
   const raw = JSON.parse(fs.readFileSync(configPath, 'utf8')) || {};
   raw[key] = value;
@@ -332,6 +412,10 @@ function writeCredentials(tokenFile, { resourceId, resourceToken }){
 module.exports = {
   loadConfig,
   loadDeviceConfig,
+  readEditableConfig,
+  applyEditableConfig,
+  readAppliedConfigRevision,
+  writeAppliedConfigRevision,
   saveConfigField,
   readCredentials,
   writeCredentials,

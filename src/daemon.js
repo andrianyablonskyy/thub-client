@@ -17,13 +17,17 @@
 
 const fs = require('node:fs'),
   os = require('node:os'),
-  { loadConfig, readCredentials, writeCredentials } = require('./config'),
+  {
+    loadConfig, readCredentials, writeCredentials, readEditableConfig, applyEditableConfig, readAppliedConfigRevision,
+    writeAppliedConfigRevision
+  } = require('./config'),
   { ClientApiClient } = require('./api-client'),
   { createControlSocketServer } = require('./control-socket'),
   { JobRunner } = require('./runner'),
   { describeCapabilities } = require('./capabilities'),
   { syncUdevRules } = require('./udev'),
   { RebootScheduler } = require('./reboot-schedule'),
+  { scanUsb } = require('./usb-scan'),
   { readHold } = require('./host-hold'),
   { PACKAGES, isNewer } = require('@andrian.yablonskyy/thub-common'),
   { version } = require('../package.json');
@@ -65,6 +69,10 @@ class Daemon{
     this.pollAbort = null;
     // Host-wide hold by a root helper: null, 'update' or 'reboot'.
     this.holdReason = null;
+    // Dashboard config edits (Config tab): the revision applied, and a
+    // restart owed once idle so the new capabilities take effect.
+    this.configState = readAppliedConfigRevision(config.configRevisionFile);
+    this.restartForConfig = false;
     this.reboot = new RebootScheduler({
       scheduleFile: config.rebootScheduleFile,
       requestFile: config.rebootRequestFile,
@@ -145,7 +153,9 @@ class Daemon{
             addresses: localAddresses(),
             timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone
           },
-          capabilities: { ...describeCapabilities(this.config), rebootSupported: RebootScheduler.supported() }
+          capabilities: { ...describeCapabilities(this.config), rebootSupported: RebootScheduler.supported() },
+          // Editable from the dashboard's Config tab (secrets left out).
+          config: this._editableConfig()
         });
       writeCredentials(this.config.tokenFile, { resourceId, resourceToken });
       this.resourceId = resourceId;
@@ -294,7 +304,11 @@ class Daemon{
       },
       // The reboot schedule this Client applies — the Coordinator resends
       // set-reboot-schedule until it matches what was saved.
-      rebootSchedule: this.reboot.cron
+      rebootSchedule: this.reboot.cron,
+      // Likewise the dashboard config revision (set-config), and why the
+      // last one was refused, if it was.
+      configRevision: this.configState.revision,
+      configError: this.configState.error
     });
 
     for (const command of commands || []){
@@ -328,6 +342,85 @@ class Daemon{
       else if (command.command === 'reboot'){
         this.reboot.requestNow(command.reason || 'user reboot request');
       }
+      else if (command.command === 'set-config'){
+        this._applyConfig(command);
+      }
+      // "Connected USB devices" Refresh on the resource card: lsusb, answered
+      // right away rather than with the next heartbeat.
+      else if (command.command === 'scan-usb'){
+        this._scanUsb(command.requestId);
+      }
+    }
+    await this._restartForConfigIfIdle();
+  }
+
+  async _scanUsb(requestId){
+    const { output, error } = await scanUsb();
+    try {
+      await this.client.post(`/resources/${this.resourceId}/usb-scan`, { requestId, output, error });
+      console.log(`USB scan sent${error ? ` (${error})` : ''}`);
+    }
+    catch (err){
+      console.error(`USB scan: couldn't send the result: ${err.message}`);
+    }
+  }
+
+  _editableConfig(){
+    try {
+      return this.config.configPath ? readEditableConfig(this.config.configPath, this.config.type) : null;
+    }
+    catch (err){
+      console.warn(`config: can't report the editable config: ${err.message}`);
+      return null;
+    }
+  }
+
+  // set-config (dashboard Config tab): write the new hw/sw section into
+  // this Client's config file, then restart once idle for it to take
+  // effect. Repeated by the Coordinator until the revision is reported, so
+  // an older or already-applied one is ignored; a refused one is reported
+  // (configError) rather than retried.
+  _applyConfig({ revision, type, config }){
+    if (!Number.isInteger(revision) || revision <= this.configState.revision){
+      return;
+    }
+    try {
+      if (type !== this.config.type){
+        throw new Error(`it's a ${type} config, but this is a ${this.config.type} Client`);
+      }
+      applyEditableConfig(this.config.configPath, type, config);
+      this.configState = { revision, error: null };
+      this.restartForConfig = true;
+      console.log(`config revision ${revision} from the Coordinator written to ${this.config.configPath}; restarting once idle`);
+    }
+    catch (err){
+      this.configState = { revision, error: `Config revision ${revision} refused: ${err.message}` };
+      console.error(this.configState.error);
+    }
+    writeAppliedConfigRevision(this.config.configRevisionFile, this.configState.revision, this.configState.error);
+  }
+
+  // Under systemd (INVOCATION_ID) exit and let Restart= bring the Client
+  // back — ExecStartPre regenerates the udev rules as root, and the new
+  // registration reports the new capabilities. Run by hand, reload in place.
+  async _restartForConfigIfIdle(){
+    if (!this.restartForConfig || this.activeJobId || this.localLock.locked || this.holdReason){
+      return;
+    }
+    this.restartForConfig = false;
+    if (process.env.INVOCATION_ID){
+      console.log('restarting to apply the new config');
+      this.stop();
+      return;
+    }
+    try {
+      this.config = loadConfig(this.config.configPath, { name: this.config.name });
+      this._syncUdevRules();
+      await this._ensureRegistered();
+      console.log('new config applied (reloaded in place)');
+    }
+    catch (err){
+      console.error(`applying the new config failed: ${err.message}`);
     }
   }
 
