@@ -26,10 +26,12 @@ function configFile(content){
   return file;
 }
 
-test('reports the hw section normalized: shorthand entries and legacy single-device fields spelled out, power control dropped', () => {
+test('reports hw-devices normalized: shorthand entries and legacy single-device fields spelled out, power control dropped', () => {
   const file = configFile({
     type: 'hw',
-    hw: { stlinkSerial: 'ABC123', uart: 2, usbs: ['/dev/thub/dut1-usb', 3], relays: [{ channel: 0 }], power: { method: 'uhubctl', hub: '1-1', port: 2 } }
+    'hw-devices': {
+      stlinkSerial: 'ABC123', uart: 2, usbs: ['/dev/thub/dut1-usb', 3], relays: [{ channel: 0 }], power: { method: 'uhubctl', hub: '1-1', port: 2 }
+    }
   });
   assert.deepEqual(readEditableConfig(file, 'hw'), {
     stlinks: [{ serial: 'ABC123' }],
@@ -39,40 +41,48 @@ test('reports the hw section normalized: shorthand entries and legacy single-dev
   assert.deepEqual([loadConfig(file).hw.relays, loadConfig(file).hw.power], [undefined, undefined]); // an older file still loads, without them
 });
 
-test('reports the sw section without its secrets', () => {
-  const file = configFile({ type: 'sw', sw: { image: 'emu:1', registry: 'reg.lab', registryAuth: { username: 'u', passwordFile: '/etc/p' } } });
-  assert.deepEqual(readEditableConfig(file, 'sw'), { image: 'emu:1', registry: 'reg.lab' });
+test('an older file\'s `hw` section still loads as hw-devices; its `sw` section is ignored', () => {
+  const hw = configFile({ type: 'hw', hw: { uarts: [1] } }),
+    sw = configFile({ type: 'sw', sw: { image: 'emu:1', registryAuth: { username: 'u', passwordFile: '/nope' } } });
+  assert.equal(loadConfig(hw).hw.uarts[0].path, '/dev/thub/dut1-uart');
+  assert.deepEqual(readEditableConfig(hw, 'hw').uarts, [{ index: 1 }]);
+  assert.equal(loadConfig(sw).sw, undefined); // no passwordFile read, no error
+  assert.deepEqual(readEditableConfig(sw, 'sw'), {});
+  assert.equal(readShareableConfigFile(sw).sw, undefined);
 });
 
-test('applying an edit keeps private fields and the rest of the file; the result loads', () => {
-  const file = configFile({ type: 'sw', labels: ['a'], sw: { image: 'emu:1', registryAuth: { username: 'u', password: 'secret' } } });
-  applyEditableConfig(file, 'sw', { image: 'emu:2', cpus: 1, memory: '1g', cmd: ['--x'] });
+test('applying an edit writes hw-devices, drops older hw / sw sections, keeps the rest; the result loads', () => {
+  const file = configFile({ type: 'hw', labels: ['a'], hw: { uarts: [1] }, sw: { image: 'x' } });
+  applyEditableConfig(file, 'hw', { uarts: [{ index: 2, baudRate: 9600 }] });
   const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
-  assert.deepEqual(raw.sw, { image: 'emu:2', cpus: 1, memory: '1g', cmd: ['--x'], registryAuth: { username: 'u', password: 'secret' } });
-  assert.deepEqual(raw.labels, ['a']);
+  assert.deepEqual(raw['hw-devices'], { uarts: [{ index: 2, baudRate: 9600 }] });
+  assert.deepEqual([raw.hw, raw.sw, raw.labels], [undefined, undefined, ['a']]);
   assert.equal(fs.statSync(file).mode & 0o777, 0o600);
-  assert.equal(loadConfig(file).sw.image, 'emu:2');
+  assert.equal(loadConfig(file).hw.uarts[0].path, '/dev/thub/dut2-uart');
+
+  assert.throws(() => applyEditableConfig(file, 'sw', { image: 'emu:2' }), /SW Client has no settings of its own/);
 });
 
 test('an invalid edit is refused and the file left as it was', () => {
-  const file = configFile({ type: 'hw', hw: { uarts: [1] } }),
+  const file = configFile({ type: 'hw', 'hw-devices': { uarts: [1] } }),
     before = fs.readFileSync(file, 'utf8');
-  assert.throws(() => applyEditableConfig(file, 'hw', { uarts: [{ path: '/tmp/nope' }] }), /hw\.uarts\.0\.path/);
+  assert.throws(() => applyEditableConfig(file, 'hw', { uarts: [{ path: '/tmp/nope' }] }), /hw-devices\.uarts\.0\.path/);
   assert.equal(fs.readFileSync(file, 'utf8'), before);
 });
 
-test('import: the file\'s other fields written too; this Client keeps its URL, name, join key, id, paths and secrets', () => {
+test('import: the file\'s other fields written too; this Client keeps its URL, name, join key, id and paths', () => {
   const file = configFile({
     name: 'dut1', type: 'sw', clientId: 'c-1', labels: [], tokenFile: '/var/lib/thub/dut1.token',
     artifactory: { token: 'secret', tokenFile: '/etc/thub/a.token', allowedArtifactPrefixes: [] },
+    sources: { allowedPrefixes: ['*'] },
     sw: { image: 'emu:1', registryAuth: { password: 'x' } }
   });
-  assert.deepEqual(readShareableConfigFile(file).artifactory, { tokenFile: '/etc/thub/a.token', allowedArtifactPrefixes: [] });
-  assert.equal(readShareableConfigFile(file).sw.registryAuth, undefined);
+  // Legacy sections, unused now (artifactory and sw held secrets): not reported.
+  assert.deepEqual(['artifactory', 'sources', 'sw'].map((k) => readShareableConfigFile(file)[k]), [undefined, undefined, undefined]);
 
-  applyEditableConfig(file, 'sw', { image: 'emu:2' }, {
-    labels: ['board:b'], heartbeatIntervalSec: 5, sources: { allowedPrefixes: ['*'] },
-    artifactory: { allowedArtifactPrefixes: ['https://art/'] },
+  applyEditableConfig(file, 'sw', {}, {
+    labels: ['board:b'], heartbeatIntervalSec: 5,
+    sources: { allowedPrefixes: ['https://x/'] }, artifactory: { allowedArtifactPrefixes: ['https://art/'] },
     // Filtered out by the Coordinator already; ignored here again regardless.
     joinKey: 'other', coordinatorUrl: 'https://evil', name: 'dut9', clientId: 'c-9', tokenFile: '/tmp/x'
   });
@@ -81,16 +91,18 @@ test('import: the file\'s other fields written too; this Client keeps its URL, n
     [raw.coordinatorUrl, raw.joinKey, raw.name, raw.clientId, raw.tokenFile],
     ['http://x', 'k', 'dut1', 'c-1', '/var/lib/thub/dut1.token']
   );
-  assert.deepEqual([raw.labels, raw.heartbeatIntervalSec, raw.sources], [['board:b'], 5, { allowedPrefixes: ['*'] }]);
-  assert.deepEqual(raw.artifactory, { allowedArtifactPrefixes: ['https://art/'], token: 'secret', tokenFile: '/etc/thub/a.token' });
-  assert.deepEqual(raw.sw, { image: 'emu:2', registryAuth: { password: 'x' } });
+  assert.deepEqual([raw.labels, raw.heartbeatIntervalSec], [['board:b'], 5]);
+  // Legacy sections aren't imported; artifactory/sources are left as they were, sw is dropped.
+  assert.deepEqual(raw.sources, { allowedPrefixes: ['*'] });
+  assert.deepEqual(raw.artifactory, { token: 'secret', tokenFile: '/etc/thub/a.token', allowedArtifactPrefixes: [] });
+  assert.equal(raw.sw, undefined);
 
-  assert.throws(() => applyEditableConfig(file, 'sw', { image: 'emu:3' }, { labels: 'x' }), /labels must be array/);
-  assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).sw.image, 'emu:2'); // refused: nothing written
+  assert.throws(() => applyEditableConfig(file, 'sw', {}, { labels: 'x' }), /labels must be array/);
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')).labels, ['board:b']); // refused: nothing written
 });
 
 test('a dashboard revision that still carries power control is applied without it', () => {
-  const file = configFile({ type: 'hw', hw: { usbs: [] } });
+  const file = configFile({ type: 'hw', 'hw-devices': { usbs: [] } });
   applyEditableConfig(file, 'hw', { usbs: [{ index: 1 }], relays: [], power: { method: 'uhubctl', hub: '1-1', port: 2 } });
-  assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')).hw, { usbs: [{ index: 1 }] });
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8'))['hw-devices'], { usbs: [{ index: 1 }] });
 });

@@ -20,7 +20,7 @@ const test = require('node:test'),
   path = require('node:path'),
   { dockerLoginFor, dockerLogin } = require('../src/docker-login'),
   { cloneRepo } = require('../src/downloader'),
-  { imageSources } = require('../src/executors/sw'),
+  { imageSource } = require('../src/executors/sw'),
   { JobRunner, dryRunPlan } = require('../src/runner');
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'thub-env-')),
@@ -56,7 +56,7 @@ test('job env: git commands get it (under git\'s safety settings), and so does t
   const bin = tmp(),
     calls = fakeTool(bin, 'git', { out: 'abc123' }),
     env = { JOB_MARK: 'm1', PATH: `${bin}:${process.env.PATH}` };
-  assert.equal(await cloneRepo({ url: 'https://git.lab/r.git' }, path.join(tmp(), 'work'), {}, { env }), 'abc123');
+  assert.equal(await cloneRepo({ url: 'https://git.lab/r.git' }, path.join(tmp(), 'work'), { env }), 'abc123');
   assert.ok(calls().length >= 4 && calls().every((l) => l.includes('mark=m1')), calls().join('\n'));
 
   const jobDir = tmp(),
@@ -70,12 +70,14 @@ test('job env: git commands get it (under git\'s safety settings), and so does t
   assert.ok(lines.includes(`mark=m2 reg=registry.lab:5000 config=${task.dockerConfig} job=M-1`), lines.join('\n'));
 });
 
-test('image pulls from the login\'s registry use its credentials, over the Client\'s own', () => {
-  const login = { registry: 'https://registry.lab:5000/', username: 'ci', password: 'pw' },
-    auth = { username: 'ci', password: 'pw', serveraddress: 'registry.lab:5000' };
-  assert.deepEqual(imageSources('registry.lab:5000/python:3.14', {}, login)[0].auth, auth);
-  assert.deepEqual(imageSources('python:3.14', { registry: 'registry.lab:5000', registryAuth: { username: 'own' } }, login)[0].auth, auth);
-  assert.deepEqual(imageSources('other.lab/app:1', {}, login)[0].auth, null);
+test('an image is pulled from the registry it names (else Docker Hub), with the job\'s login for that registry', () => {
+  const login = { registry: 'https://registry.lab:5000/', username: 'ci', password: 'pw' };
+  assert.deepEqual(imageSource('registry.lab:5000/python:3.14', login), {
+    label: 'registry registry.lab:5000', ref: 'registry.lab:5000/python:3.14', auth: { username: 'ci', password: 'pw', serveraddress: 'registry.lab:5000' }
+  });
+  assert.deepEqual(imageSource('python:3.14', login), { label: 'Docker Hub', ref: 'python:3.14', auth: null });
+  assert.equal(imageSource('other.lab/app:1', login).auth, null);
+  assert.equal(imageSource('alpine', { registry: 'docker.io', username: 'u', password: 'p' }).auth.username, 'u');
 });
 
 test('dry run: the job env (secret-looking values masked) and the registry login, before everything else', () => {

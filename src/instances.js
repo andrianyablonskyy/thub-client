@@ -57,8 +57,8 @@ function isConfigured(raw, paths, name){
 }
 
 // A new instance starts from client.json (coordinatorUrl, joinKey, varDir,
-// artifactory, ...) with the requested type; `name` is dropped since the
-// unit passes the instance name as --name. An existing config is kept,
+// hw-devices, ...) with the requested type — an SW one without hw-devices;
+// `name` is dropped since the unit passes the instance name as --name. An existing config is kept,
 // only its type is updated, so re-registering is safe.
 function register(name, type){
   validate(name, type);
@@ -67,7 +67,11 @@ function register(name, type){
     raw = exists ? readConfig(configPath) : readConfig(paths.configPath);
   if (!exists){
     delete raw.name;
-    delete raw[type === 'hw' ? 'sw' : 'hw'];
+    delete raw.sw; // older files: an SW Client has no settings any more
+    if (type === 'sw'){
+      delete raw['hw-devices'];
+      delete raw.hw;
+    }
   }
   raw.type = type;
   fs.mkdirSync(paths.configDir, { recursive: true });

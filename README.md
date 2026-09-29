@@ -101,19 +101,14 @@ If two instances instead share the exact same config file (told apart only by `n
 | `clientId` | No | — | Explicit identity UUID, skipping `clientIdFile`. Also settable as `THUB_CLIENT_ID`. |
 | `heartbeatIntervalSec` | No | `10` | How often the daemon heartbeats. |
 | `longPollWaitSec` | No | `30` | How long each job long-poll waits before returning `204`. |
-| `artifactory.tokenFile` | No | — | Path to the Client's own read-only Artifactory token. |
-| `artifactory.allowedArtifactPrefixes` | No | `[]` | Artifactory URL prefixes: downloads from here get the Artifactory token. |
-| `sources.allowedPrefixes` | No | `[]` | Other places a job's `--download-file` files and `--git-repo` may come from (`"*"` = any), never with the token. A URL under neither list is refused; with both empty, anything is allowed (with the token). |
 
-**Capabilities.** At every registration (each start/restart) the Client reports what this config lets it drive: for HW each `hw.stlinks`/`uarts`/`usbs` device (path, ST-Link serial, UART baud rate, and whether the device node exists right now); for SW the image, its source and the CPU/memory limits. The Coordinator's resource card lists them and flags a configured device that's missing. After plugging in or moving an adapter, restart the instance to refresh them.
+**Capabilities.** At every registration (each start/restart) the Client reports what this config lets it drive: for HW each `hw-devices.stlinks`/`uarts`/`usbs` device (path, ST-Link serial, UART baud rate, and whether the device node exists right now); for SW the image, its source and the CPU/memory limits. The Coordinator's resource card lists them and flags a configured device that's missing. After plugging in or moving an adapter, restart the instance to refresh them.
 
 **Heartbeats** (every `heartbeatIntervalSec`) report the state, the host's network addresses, the host's uptime and the current activity (idle, running a job until it's fully finished including uploads, locked locally, or held for a self-update) with its duration — shown on the Coordinator's resource card.
 
-**SW-only** (`type: sw`): `sw.image` (required — a plain repository name like `dut-emulator:2026.08`), `sw.registry` (local registry `host[:port]`), `sw.registryAuth` (`{ username, passwordFile | password }`), `sw.allowDockerHub` (default `false`), `sw.cpus` (default 2), `sw.memory` (default `2g`).
+**SW Clients** (`type: sw`) have no settings of their own: each job brings its DUT image (`--docker-image`), pulled from the registry its reference names (Docker Hub for a short name), with the job's `DOCKER_*` login where that applies. An older file's `sw` section is ignored.
 
-The image is looked up in order: `sw.registry` first, then Docker Hub only if `sw.allowDockerHub` is `true`, and if neither has it the job fails with the reason for each source. An image already cached on the host counts for its source. An image that names its own registry host (`other.example.com/emu:1`) is pulled from that host only. A plain-HTTP registry must also be in the Docker daemon's `insecure-registries`.
-
-**HW-only** (`type: hw`): up to 8 each of `hw.stlinks`, `hw.uarts`, `hw.usbs` (entries: udev index 1–8 → `/dev/thub/dut<N>-stlink|uart|usb`, a path, or `{ index | path, ... }`; ST-Link entries may give `serial`, UARTs `baudRate`; any of them `devpath` plus optional `vendorId`/`productId`/`subsystem` to get a udev symlink rule). The legacy `hw.stlinkSerial` and `hw.uart` still work. Power control from older versions (`hw.relays`, `hw.power`) is ignored.
+**HW Clients** (`type: hw`): the `hw-devices` section (older files: `hw`, still read) — up to 8 each of `stlinks`, `uarts`, `usbs` (entries: udev index 1–8 → `/dev/thub/dut<N>-stlink|uart|usb`, a path, or `{ index | path, ... }`; ST-Link entries may give `serial`, UARTs `baudRate`; any of them `devpath` plus optional `vendorId`/`productId`/`subsystem` to get a udev symlink rule). The legacy `stlinkSerial` and `uart` fields still work. Power control from older versions (`relays`, `power`) is ignored, and so are the old `artifactory` and `sources` sections: the Client fetches a job's `--download-file` files and `--git-repo` from wherever the job says, without credentials of its own.
 
 Example SW config:
 
@@ -122,9 +117,7 @@ Example SW config:
   "coordinatorUrl": "https://thub.example.com",
   "name": "lab-sw-01",
   "type": "sw",
-  "joinKey": "<same value as the Coordinator's clientJoinKey>",
-  "artifactory": { "tokenFile": "/etc/thub/artifactory.token" },
-  "sw": { "image": "dut-emulator:2026.08", "registry": "registry.lab.local:5000", "allowDockerHub": false, "cpus": 2, "memory": "2g" }
+  "joinKey": "<same value as the Coordinator's clientJoinKey>"
 }
 ```
 
@@ -172,7 +165,7 @@ It only ever installs `thub-client`, at a strictly validated version. Logs: `jou
 2. Create a fresh workspace `<workDir>/<jobId>`.
 3. **Log in to the job's registry**, if its `--env` has `DOCKER_REGISTRY`, `DOCKER_USERNAME` and `DOCKER_PASSWORD`: `echo "$DOCKER_PASSWORD" | docker login "$DOCKER_REGISTRY" --username "$DOCKER_USERNAME" --password-stdin`, into `<workDir>/<jobId>/docker` (mode `0700`) — a Docker config of the job's own, never the service user's. A failed login ends the job as ERROR.
 4. **Prepare the task's inputs**: clone `--git-repo` into `work/` at its ref and depth (else an empty `work/`), and download every `--download-file` into `downloads/`.
-5. **Prepare** the DUT through the executor: HW resolves ST-Link serials and captures UARTs (nothing is flashed — the command does that); SW starts the DUT container (`--docker-image` or `sw.image`, downloads at `/downloads`), pulled with the job's registry login when it comes from `DOCKER_REGISTRY`.
+5. **Prepare** the DUT through the executor: HW resolves ST-Link serials and captures UARTs (nothing is flashed — the command does that); SW starts the job's DUT container (`--docker-image`, if any; downloads at `/downloads`), pulled with the job's registry login when it comes from `DOCKER_REGISTRY`.
 6. **Run** the job's `--command` with `sh -c` in `work/`, `--arg` values as `"$@"`, and the environment: the job's `--env` variables, `DOCKER_CONFIG` (after a registry login), `THUB_DUT_*`, `THUB_DOWNLOAD_<n>`/`THUB_DOWNLOADS_DIR`/`THUB_DOWNLOADS`, `THUB_GIT_COMMIT`, `THUB_JOB_ID`, `THUB_SUITE`, `THUB_WORK_DIR`, one `THUB_META_<KEY>` per job metadata field. Its exit code is the verdict.
 7. Collect results: everything in `work/results/` and `work/artifacts/`, plus `flash.log` / `console.log`. JUnit XML among them is summed into the job's `summary` (total/passed/failed/skipped). The verdict stays the exit code.
 8. Upload artifacts, post the result, delete the workspace (the registry login with it), report `IDLE`.
@@ -187,11 +180,11 @@ A cancel command or job timeout sends `SIGTERM` to the test process group, waits
 
 ST-Link via `st-flash`/`openocd`, UART via the `serialport` npm package. Stable device paths (`/dev/thub/dut<N>-uart`, `/dev/thub/dut<N>-usb`, `/dev/thub/dut<N>-stlink`, N = 1–8) come from udev rules the Client generates from its own config.
 
-**udev rules.** No udev setup at install time. On every start the Client writes `/etc/udev/rules.d/99-thub-<instance>.rules` from the `hw.stlinks`/`hw.uarts`/`hw.usbs` entries that have a `devpath` (the USB port path, `ATTRS{devpath}` in `udevadm info -a -n <device>`). It then reloads udev, re-triggers `usb`/`tty` devices and waits for them to settle, but only when the file actually changes. Defaults per kind: ST-Link `0483:3748` on `usb`, UART `0403:6001` on `tty`, USB `0483:5740` on `usb`; override them per entry with `vendorId`/`productId`/`subsystem`. Under systemd, the unit's `ExecStartPre=+` does this as root. Preview the rules with `thub-client [--config <path>] udev --print`, and apply them without a restart with `sudo thub-client [--config <path>] udev`. Upgrading from ≤ 1.0.17: move each `ATTR{devpath}` from the old `/etc/udev/rules.d/99-thub.rules` into the matching config entry, then delete that file. Nothing is flashed by the Client: the job's `--command` does it, with every device in its environment as `THUB_DUT_UART_<n>`/`THUB_DUT_USB_<n>`/`THUB_DUT_STLINK_<n>` (ST-Links by serial; `THUB_DUT_STLINK` = the first).
+**udev rules.** No udev setup at install time. On every start the Client writes `/etc/udev/rules.d/99-thub-<instance>.rules` from the `hw-devices.stlinks`/`hw-devices.uarts`/`hw-devices.usbs` entries that have a `devpath` (the USB port path, `ATTRS{devpath}` in `udevadm info -a -n <device>`). It then reloads udev, re-triggers `usb`/`tty` devices and waits for them to settle, but only when the file actually changes. Defaults per kind: ST-Link `0483:3748` on `usb`, UART `0403:6001` on `tty`, USB `0483:5740` on `usb`; override them per entry with `vendorId`/`productId`/`subsystem`. Under systemd, the unit's `ExecStartPre=+` does this as root. Preview the rules with `thub-client [--config <path>] udev --print`, and apply them without a restart with `sudo thub-client [--config <path>] udev`. Upgrading from ≤ 1.0.17: move each `ATTR{devpath}` from the old `/etc/udev/rules.d/99-thub.rules` into the matching config entry, then delete that file. Nothing is flashed by the Client: the job's `--command` does it, with every device in its environment as `THUB_DUT_UART_<n>`/`THUB_DUT_USB_<n>`/`THUB_DUT_STLINK_<n>` (ST-Links by serial; `THUB_DUT_STLINK` = the first).
 
 ### SW executor
 
-Runs the job's own image (`--docker-image`, if `sw.allowJobImages`) or else `sw.image` (with `sw.cmd`, if set) as the DUT, the job's downloads mounted read-only at `/downloads`; with neither, the command runs without a container. Pulls from the local registry (`sw.registry`), then Docker Hub if `sw.allowDockerHub`, else fails (see "Configuration reference"). Runs the emulator (e.g. Renode, QEMU) in Docker via `dockerode`, one container per job, isolated network, always removed in teardown. The emulator's virtual UART is exposed as a TCP port the test runner connects to via `THUB_DUT_HOST`.
+Runs the job's own image (`--docker-image`) as the DUT with its default command, the job's downloads mounted read-only at `/downloads`; without one, the command runs without a container. The image is pulled from the registry its reference names, else Docker Hub, unless already cached. Runs it (e.g. a Renode or QEMU emulator) in Docker via `dockerode`, one container per job, read-only root filesystem, 2 CPUs / 2 GB, isolated network, always removed in teardown. The emulator's virtual UART is exposed as a TCP port the test runner connects to via `THUB_DUT_HOST`.
 
 ## Development
 

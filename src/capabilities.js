@@ -1,7 +1,7 @@
 /**
  * @file        packages/client/src/capabilities.js
- * @description What this Client can drive — its udev devices (HW) or emulator image
- *              and limits (SW) — reported to the Coordinator at registration (README §5.1, §10)
+ * @description What this Client can drive — an HW Client's udev devices (an SW Client has none of its own) —
+ *              reported to the Coordinator at registration (README §5.1, §10)
  *
  * @author      Andrian Yablonskyy
  * @copyright   Copyright (c) 2026 Andrian Yablonskyy. All rights reserved.
@@ -28,18 +28,9 @@ function describeCapabilities(config){
 }
 
 function describeTyped(config){
+  // An SW Client has no settings: it runs whatever DUT image a job brings.
   if (config.type === 'sw'){
-    const sw = config.sw || {};
-    return {
-      sw: {
-        image: sw.image || null,
-        registry: sw.registry || null,
-        allowDockerHub: Boolean(sw.allowDockerHub),
-        allowJobImages: Boolean(sw.allowJobImages),
-        cpus: sw.cpus || 2,
-        memory: sw.memory || '2g'
-      }
-    };
+    return { sw: {} };
   }
   const hw = config.hw || {};
   return {

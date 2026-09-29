@@ -7,11 +7,7 @@
   "joinKey": "silver-mountain-whispers-quietly-now",
   "heartbeatIntervalSec": 10,
   "longPollWaitSec": 30,
-  "artifactory": {
-    "tokenFile": "/etc/thub/artifactory.token",
-    "allowedArtifactPrefixes": ["https://artifactory.example.com/fw-local/"]
-  },
-  "hw": {
+  "hw-devices": {
     "stlinks": [
       { "path": "/dev/thub/dut1-stlink", "devpath": "3.3.4.3.1" },
       { "path": "/dev/thub/dut2-stlink", "devpath": "3.3.4.2" },
@@ -33,11 +29,5 @@
       { "path": "/dev/thub/dut4-usb", "devpath": "3.2.2" },
       { "path": "/dev/thub/dut5-usb", "devpath": "3.4" }
     ]
-  },
-  "sw": {
-    "image": "alpine",
-    "allowJobImages": true,
-    "cpus": 1,
-    "memory": "100m"
   }
 }

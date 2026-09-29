@@ -20,7 +20,7 @@ const test = require('node:test'),
   path = require('node:path'),
   http = require('node:http'),
   { execFileSync } = require('node:child_process'),
-  { downloadAccess, prepareTask, downloadNames } = require('../src/downloader'),
+  { prepareTask, downloadNames } = require('../src/downloader'),
   { JobRunner } = require('../src/runner');
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'thub-dl-')),
@@ -42,36 +42,23 @@ async function serve(root, seen = []){
   return { base: `http://127.0.0.1:${server.address().port}`, close: () => server.close() };
 }
 
-test('download policy: token only for Artifactory prefixes; other sources only if allowed, without it', () => {
-  const cfg = {
-    artifactory: { token: 'secret', allowedArtifactPrefixes: ['https://art.lab/fw/'] },
-    sources: { allowedPrefixes: ['http://localhost/', 'https://git.lab/'] }
-  };
-  assert.deepEqual(downloadAccess('https://art.lab/fw/app.bin', cfg), { token: 'secret' });
-  assert.deepEqual(downloadAccess('http://localhost/test-cases', cfg), { token: null });
-  assert.deepEqual(downloadAccess('https://git.lab/team/tests.git', cfg), { token: null });
-  assert.throws(() => downloadAccess('https://evil.example/x', cfg), /sources.*allowedPrefixes/);
-  assert.deepEqual(downloadAccess('https://anything/x', { ...cfg, sources: { allowedPrefixes: ['*'] } }), { token: null });
-  // Neither list configured: the original allow-all behavior, token included.
-  assert.deepEqual(downloadAccess('https://anything/x', { artifactory: { token: 't' } }), { token: 't' });
-});
-
-test('downloads: every file into the downloads dir, named after its URL, numbered on clashes', async (t) => {
+test('downloads: every file into the downloads dir, named after its URL, numbered on clashes; no credentials sent', async (t) => {
   const root = tmp();
   fs.mkdirSync(path.join(root, 'a'));
   fs.writeFileSync(path.join(root, 'app.bin'), 'firmware');
   fs.writeFileSync(path.join(root, 'a', 'app.bin'), 'other');
-  const { base, close } = await serve(root);
+  const seen = [],
+    { base, close } = await serve(root, seen);
   t.after(close);
-  const cfg = { sources: { allowedPrefixes: [base] } },
-    jobDir = tmp(),
-    task = await prepareTask({ downloads: [{ url: `${base}/app.bin` }, { url: `${base}/a/app.bin` }] }, jobDir, cfg);
+  const jobDir = tmp(),
+    task = await prepareTask({ downloads: [{ url: `${base}/app.bin` }, { url: `${base}/a/app.bin` }] }, jobDir);
   assert.deepEqual(task.downloads.map((p) => path.relative(jobDir, p)), ['downloads/app.bin', 'downloads/2-app.bin']);
   assert.equal(fs.readFileSync(task.downloads[1], 'utf8'), 'other');
   assert.ok(fs.statSync(task.workDir).isDirectory()); // no repo: an empty work dir
   assert.equal(task.commit, null);
   assert.deepEqual(downloadNames(['https://x/', 'https://x/a%20b.bin', 'https://x/../..']), ['download-1', 'a_b.bin', 'download-3']);
-  await assert.rejects(prepareTask({ downloads: [{ url: 'https://evil.example/x' }] }, tmp(), cfg), /isn't an allowed download source/);
+  assert.ok(seen.every((h) => !h.authorization));
+  await assert.rejects(prepareTask({ downloads: [{ url: `${base}/missing.bin` }] }, tmp()), /Download failed \(404\)/);
 });
 
 test('git repo: ref as branch, tag, full or short commit, or the default branch; depth honoured', async (t) => {
@@ -96,10 +83,9 @@ test('git repo: ref as branch, tag, full or short commit, or the default branch;
   git(path.join(root, 'repo.git'), 'update-server-info');
   const { base, close } = await serve(root);
   t.after(close);
-  const cfg = { sources: { allowedPrefixes: [base] } },
-    url = `${base}/repo.git`,
+  const url = `${base}/repo.git`,
     at = async (extra) => {
-      const task = await prepareTask({ git: { url, ...extra } }, tmp(), cfg);
+      const task = await prepareTask({ git: { url, ...extra } }, tmp());
       return [fs.readFileSync(path.join(task.workDir, 'which.txt'), 'utf8'), task.commit];
     };
 
@@ -108,10 +94,9 @@ test('git repo: ref as branch, tag, full or short commit, or the default branch;
   assert.equal((await at({ ref: 'v1' }))[0], 'first');
   assert.deepEqual(await at({ ref: first }), ['first', first]);
   assert.deepEqual(await at({ ref: first.slice(0, 8) }), ['first', first]);
-  const full = await prepareTask({ git: { url, depth: 0 } }, tmp(), cfg);
+  const full = await prepareTask({ git: { url, depth: 0 } }, tmp());
   assert.equal(git(full.workDir, 'rev-list', '--count', 'HEAD'), '2');
   await assert.rejects(at({ ref: 'nope' }), /can't get ref nope/);
-  await assert.rejects(prepareTask({ git: { url: 'https://other.example/r.git' } }, tmp(), cfg), /isn't an allowed download source/);
 });
 
 test('--git-options go between git and its subcommand on every call', async (t) => {
@@ -128,8 +113,7 @@ test('--git-options go between git and its subcommand on every call', async (t) 
   t.after(close);
   const task = await prepareTask(
     { git: { url: `${base}/repo.git`, options: '-c "http.extraHeader=X-Thub-Test: yes, it works"' } },
-    tmp(),
-    { sources: { allowedPrefixes: [base] } }
+    tmp()
   );
   assert.ok(fs.existsSync(path.join(task.workDir, 'f.txt')));
   assert.ok(seen.length > 0);

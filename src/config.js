@@ -15,7 +15,7 @@
 
 const fs = require('node:fs'),
   {
-    validateClientConfig, publicClientConfig, shareableClientConfigFile, importClientConfigFile, withoutPowerControl, CLIENT_CONFIG_PRIVATE_FIELDS
+    validateClientConfig, shareableClientConfigFile, importClientConfigFile, withoutPowerControl, hwDevicesOf, HW_DEVICES_SECTION
   } = require('@andrian.yablonskyy/thub-common'),
   os = require('node:os'),
   path = require('node:path'),
@@ -82,7 +82,9 @@ function loadConfig(configPath = process.env.THUB_CLIENT_CONFIG, overrides = {})
     varDir = raw.varDir || path.join(process.cwd(), '.data'),
     runDir = raw.runDir || varDir,
 
-    hw = resolveHwConfig(raw.hw || {}),
+    // `hw-devices` (older files: `hw`); an older file's `sw` section is
+    // ignored — an SW Client has no settings of its own.
+    hw = resolveHwConfig(hwDevicesOf(raw) || {}),
 
     config = {
       coordinatorUrl: raw.coordinatorUrl,
@@ -118,13 +120,9 @@ function loadConfig(configPath = process.env.THUB_CLIENT_CONFIG, overrides = {})
       // The dashboard config revision (Config tab) this instance has applied.
       configRevisionFile: raw.configRevisionFile || path.join(varDir, instance, 'config-revision.json'),
       rebootRequestFile: raw.rebootRequestFile || path.join(varDir, 'reboot-request.json'),
-      artifactory: resolveArtifactoryConfig(raw.artifactory || {}),
-      // Other places a task's --download-file files and --git-repo may come
-      // from — URL prefixes, "*" for any. Never sent the Artifactory token
-      // (downloader.js downloadAccess).
-      sources: { allowedPrefixes: Array.isArray(raw.sources?.allowedPrefixes) ? raw.sources.allowedPrefixes : [] },
+      // `sources` / `artifactory` sections left in an older file are
+      // ignored: a Client fetches a job's inputs from wherever the job says.
       hw,
-      sw: resolveSwConfig(raw.sw || {}),
       heartbeatIntervalSec: raw.heartbeatIntervalSec || 10,
       longPollWaitSec: raw.longPollWaitSec || 30,
       configPath: candidate
@@ -161,7 +159,7 @@ function loadConfig(configPath = process.env.THUB_CLIENT_CONFIG, overrides = {})
 function loadDeviceConfig(configPath = process.env.THUB_CLIENT_CONFIG){
   const candidate = findConfigFile(configPath),
     raw = JSON.parse(fs.readFileSync(candidate, 'utf8')) || {};
-  return { instance: instanceName(candidate), type: raw.type, hw: resolveHwConfig(raw.hw || {}) };
+  return { instance: instanceName(candidate), type: raw.type, hw: resolveHwConfig(hwDevicesOf(raw) || {}) };
 }
 
 function readOrCreateClientId(clientIdFile){
@@ -240,63 +238,10 @@ function resolveHwConfig(hw){
 
   return {
     ...rest,
-    uarts: resolveDeviceList('hw.uarts', uarts, 'uart'),
-    usbs: resolveDeviceList('hw.usbs', rest.usbs || [], 'usb'),
-    stlinks: resolveDeviceList('hw.stlinks', stlinks, 'stlink')
+    uarts: resolveDeviceList(`${HW_DEVICES_SECTION}.uarts`, uarts, 'uart'),
+    usbs: resolveDeviceList(`${HW_DEVICES_SECTION}.usbs`, rest.usbs || [], 'usb'),
+    stlinks: resolveDeviceList(`${HW_DEVICES_SECTION}.stlinks`, stlinks, 'stlink')
   };
-}
-
-// §8.3: where the SW executor gets `sw.image` from, in order — the lab's
-// own registry (`registry`, host[:port]; an http(s):// prefix is dropped,
-// Docker picks the scheme), then Docker Hub only if `allowDockerHub` is
-// true. Registry credentials follow the Artifactory token's pattern: the
-// password comes from a file, not the config itself.
-function resolveSwConfig(sw){
-  const registry = typeof sw.registry === 'string' ? sw.registry.trim().replace(/^https?:\/\//i, '').replace(/\/+$/, '') : '',
-    auth = sw.registryAuth;
-  let registryAuth = null;
-  if (registry && auth?.username){
-    let password = auth.password || '';
-    if (!password && auth.passwordFile){
-      try {
-        password = fs.readFileSync(auth.passwordFile, 'utf8').trim();
-      }
-      catch (err){
-        throw new Error(`sw.registryAuth.passwordFile: ${err.message}`);
-      }
-    }
-    registryAuth = { username: auth.username, password, serveraddress: registry };
-  }
-  // allowJobImages: run a job's own Docker image (`thub run --type sw
-  // --docker-image alpine`, spec `image`) instead of sw.image. Off by default:
-  // it lets anyone with an agent token pick the DUT image this host runs (in
-  // the usual sandboxed container). Reported to the Coordinator, which only
-  // schedules such jobs here when it's on. cmd: the container command for
-  // sw.image (e.g. ["--firmware", "/downloads/app.bin"]); default: the image's own.
-  if (sw.cmd !== undefined && !(Array.isArray(sw.cmd) && sw.cmd.every((a) => typeof a === 'string'))){
-    throw new Error('sw.cmd must be an array of strings');
-  }
-  return {
-    ...sw,
-    registry: registry || null,
-    allowDockerHub: sw.allowDockerHub === true,
-    allowJobImages: sw.allowJobImages === true,
-    registryAuth
-  };
-}
-
-// §13: the Client's read-only Artifactory token lives in its own file
-// (tokenFile), never inline in config or passed through the Coordinator (§12).
-function resolveArtifactoryConfig(artifactory){
-  if (artifactory.token || !artifactory.tokenFile){
-    return artifactory;
-  }
-  try {
-    return { ...artifactory, token: fs.readFileSync(artifactory.tokenFile, 'utf8').trim() };
-  }
-  catch {
-    return artifactory;
-  }
 }
 
 // ---- Capabilities edited from the dashboard (README §10, Config tab) ----
@@ -306,12 +251,12 @@ function resolveArtifactoryConfig(artifactory){
 const asDeviceObjects = (list) => (Array.isArray(list) ? list : []).map((e) =>
   typeof e === 'number' ? { index: e } : typeof e === 'string' ? { path: e } : e);
 
-// The editable part of this Client's config: its `hw` or `sw` section as in
-// the file, normalized (shorthand entries, legacy single-device fields) and
-// without secrets. Reported at registration.
+// The editable part of this Client's config: an HW Client's hw-devices as
+// in the file, normalized (shorthand entries, legacy single-device fields);
+// an SW Client's is empty. Reported at registration.
 function readEditableConfig(configPath, type){
   const raw = JSON.parse(fs.readFileSync(configPath, 'utf8')) || {},
-    section = { ...(raw[type] || {}) };
+    section = { ...(hwDevicesOf(raw) || {}) };
   if (type === 'hw'){
     const { uart, stlinkSerial, ...rest } = withoutPowerControl(section).section,
       out = {
@@ -320,24 +265,24 @@ function readEditableConfig(configPath, type){
         uarts: asDeviceObjects(rest.uarts || (uart ? [uart] : [])),
         usbs: asDeviceObjects(rest.usbs)
       };
-    return publicClientConfig('hw', out);
+    return out;
   }
-  return publicClientConfig(type, section);
+  return {};
 }
 
-// The whole config file, its secrets left out — reported at registration
-// for the dashboard's Export.
+// The whole config file as it's shared (legacy sections left out) —
+// reported at registration for the dashboard's Export.
 function readShareableConfigFile(configPath){
   return shareableClientConfigFile(JSON.parse(fs.readFileSync(configPath, 'utf8')) || {});
 }
 
 // Applies a dashboard edit to the config file: validated (the shared schema,
-// then exactly as loadConfig would resolve it), merged with the section's
-// private fields (e.g. sw.registryAuth, never sent to the Coordinator),
-// legacy single-device fields dropped, and written atomically. Throws with a
+// then exactly as loadConfig would resolve it), legacy single-device fields
+// dropped, and written atomically — an HW Client's devices under
+// `hw-devices`, older `hw` / `sw` sections removed. Throws with a
 // readable reason if it can't be applied. `fields`: an Import's other
 // top-level fields — filtered here again (never joinKey, coordinatorUrl,
-// name, this Client's id or paths), artifactory's token and tokenFile kept.
+// name, this Client's id or paths).
 function applyEditableConfig(configPath, type, section, fields = null){
   // A revision saved before power control was removed may still carry it.
   section = type === 'hw' ? withoutPowerControl(section).section : section;
@@ -351,28 +296,17 @@ function applyEditableConfig(configPath, type, section, fields = null){
     if (!checked.valid){
       throw new Error(checked.errors.join('; '));
     }
-    const { token, tokenFile } = raw.artifactory || {};
     raw = { ...raw, ...checked.fields };
-    if (checked.fields.artifactory){
-      raw.artifactory = { ...checked.fields.artifactory, ...(token ? { token } : {}), ...(tokenFile ? { tokenFile } : {}) };
-    }
-  }
-  const current = raw[type] || {},
-    next = { ...section };
-  for (const key of CLIENT_CONFIG_PRIVATE_FIELDS[type] || []){
-    if (current[key] !== undefined){
-      next[key] = current[key];
-    }
   }
   if (type === 'hw'){
-    resolveHwConfig(next);
+    resolveHwConfig({ ...section }); // throws where loadConfig would
   }
-  else {
-    resolveSwConfig(next);
-  }
-  const mode = fs.statSync(configPath).mode & 0o777,
+  // hw-devices replaces an older `hw` section; `sw` is gone.
+  const { hw: _hw, sw: _sw, ...rest } = raw,
+    next = type === 'hw' ? { ...rest, [HW_DEVICES_SECTION]: section } : rest,
+    mode = fs.statSync(configPath).mode & 0o777,
     tmp = `${configPath}.tmp-${process.pid}`;
-  fs.writeFileSync(tmp, JSON.stringify({ ...raw, [type]: next }, null, 2) + '\n', { mode });
+  fs.writeFileSync(tmp, JSON.stringify(next, null, 2) + '\n', { mode });
   fs.renameSync(tmp, configPath);
 }
 
