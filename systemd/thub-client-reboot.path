@@ -1,0 +1,16 @@
+[Unit]
+Description=TestHub Client scheduled-reboot request watcher
+
+# PathExists=/PathModified= are rewritten by scripts/install-systemd-unit.js to
+# the reboot-request.json in the state directory (varDir) the thub-client@
+# instances write to. A Client writes it when its reboot schedule (set on the
+# Coordinator's resource card) is due; this starts thub-client-reboot.service
+# (as root), which reboots the host once no instance is busy. The helper
+# deletes the file, so PathExists= doesn't re-trigger.
+[Path]
+PathExists=/home/thub/var/lib/thub/client/reboot-request.json
+PathModified=/home/thub/var/lib/thub/client/reboot-request.json
+Unit=thub-client-reboot.service
+
+[Install]
+WantedBy=multi-user.target

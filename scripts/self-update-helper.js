@@ -16,67 +16,14 @@
 
 const fs = require('node:fs'),
   path = require('node:path'),
-  { sendCommand } = require('../src/control-socket'),
+  { writeHold, waitUntilIdle, canceled, HOLD_GRACE_MS } = require('../src/host-hold'),
   { PACKAGES, isValidVersion, compareVersions, npmInstallGlobal } = require('@andrian.yablonskyy/thub-common'),
   { version: installedVersion } = require('../package.json');
 
-const POLL_MS = 30_000,
-  MAX_WAIT_MS = 24 * 3600 * 1000,
-  // Longer than a Client's job long-poll (longPollWaitSec, default 30 s):
-  // a poll already in flight when the hold goes up may still hand its
-  // instance a job, which must then show up as busy before we look.
-  HOLD_GRACE_MS = 45_000;
-
-// npm's postinstall restarts *every* running thub-client@ instance on the
-// host, not just the one that asked — so wait until none of them has a job
-// running or a local lock (both would be lost), asking each over its
-// control socket in runDir. A socket nobody answers on is a stopped one.
-async function busyInstances(runDir){
-  let sockets = [];
-  try {
-    sockets = fs.readdirSync(runDir).filter((f) => f.endsWith('.sock')).map((f) => path.join(runDir, f));
-  }
-  catch {
-    return [];
-  }
-  const busy = [];
-  for (const socket of sockets){
-    try {
-      const s = await sendCommand(socket, { cmd: 'status' });
-      if (s.activeJobId || s.localLock?.locked){
-        busy.push(path.basename(socket, '.sock'));
-      }
-    }
-    catch {
-      // not running
-    }
-  }
-  return busy;
-}
-
-// A Client removes the hold when an admin cancels the update from the
-// Coordinator's resource card (daemon.js _cancelSelfUpdate).
-function canceled(holdFile){
-  return !fs.existsSync(holdFile);
-}
-
-async function waitUntilIdle(runDir, holdFile){
-  const deadline = Date.now() + MAX_WAIT_MS;
-  for (;;){
-    if (canceled(holdFile)){
-      return 'canceled';
-    }
-    const busy = await busyInstances(runDir);
-    if (!busy.length){
-      return 'idle';
-    }
-    if (Date.now() > deadline){
-      return 'timeout';
-    }
-    console.log(`thub-client-update: waiting for ${busy.join(', ')} to finish (job running or locally locked)`);
-    await new Promise((resolve) => setTimeout(resolve, POLL_MS));
-  }
-}
+// The self-update restarts *every* running thub-client@ instance on the
+// host (npm's postinstall), not just the one that asked — so it waits until
+// none has a job running or a local lock (src/host-hold.js).
+const MAX_WAIT_MS = 24 * 3600 * 1000;
 
 // argv: <request file> <user the Client runs as> <runDir>. The request file
 // is written by the (unprivileged) Client, so only its `version` is used,
@@ -119,7 +66,7 @@ async function main(){
   // _syncUpdateHold), so "idle" below stays true until the install
   // restarts them. Released however this ends.
   const holdFile = path.join(path.dirname(requestFile), 'update-hold.json');
-  fs.writeFileSync(holdFile, JSON.stringify({ version: target, since: new Date().toISOString() }) + '\n');
+  writeHold(holdFile, { reason: 'update', version: target });
   // `systemctl stop thub-client-update` mid-wait mustn't leave the hold up.
   for (const signal of ['SIGTERM', 'SIGINT']){
     process.on(signal, () => {
@@ -130,7 +77,7 @@ async function main(){
   try {
     console.log(`thub-client-update: holding new jobs for v${target}; waiting for running jobs and uploads to finish`);
     await new Promise((resolve) => setTimeout(resolve, HOLD_GRACE_MS));
-    const outcome = await waitUntilIdle(runDir, holdFile);
+    const outcome = await waitUntilIdle(runDir, holdFile, { maxWaitMs: MAX_WAIT_MS, what: 'thub-client-update' });
     // Last check right before the point of no return.
     if (outcome === 'canceled' || canceled(holdFile)){
       console.log('thub-client-update: canceled from the Coordinator — not installing');

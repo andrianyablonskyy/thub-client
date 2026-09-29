@@ -23,15 +23,15 @@ const fs = require('node:fs'),
   { JobRunner } = require('./runner'),
   { describeCapabilities } = require('./capabilities'),
   { syncUdevRules } = require('./udev'),
+  { RebootScheduler } = require('./reboot-schedule'),
+  { readHold } = require('./host-hold'),
   { PACKAGES, isNewer } = require('@andrian.yablonskyy/thub-common'),
   { version } = require('../package.json');
 
 // Installed by scripts/install-systemd-unit.js; runs the actual `npm i -g`
 // as root when this daemon writes its update request (README §10.2).
 const UPDATE_PATH_UNIT = '/etc/systemd/system/thub-client-update.path',
-  // A hold older than this is left over from a crashed helper — ignore it.
-  UPDATE_HOLD_MAX_AGE_MS = 2 * 3600 * 1000,
-  UPDATE_HOLD_REASON = 'self-update in progress';
+  HOLD_REASONS = { update: 'self-update in progress', reboot: 'scheduled host reboot pending' };
 
 // Every address on this host's network interfaces except loopback, for
 // the dashboard's resource card. The external address isn't known here —
@@ -63,6 +63,19 @@ class Daemon{
     this.heartbeatTimer = null;
     this.heartbeatInFlight = false;
     this.pollAbort = null;
+    // Host-wide hold by a root helper: null, 'update' or 'reboot'.
+    this.holdReason = null;
+    this.reboot = new RebootScheduler({
+      scheduleFile: config.rebootScheduleFile,
+      requestFile: config.rebootRequestFile,
+      holdFile: config.updateHoldFile,
+      instance: config.name
+    });
+  }
+
+  // Kept for the control socket's status and older callers.
+  get updateHold(){
+    return Boolean(this.holdReason);
   }
 
   // Resolves once the daemon has actually shut down (loop exited, control
@@ -71,7 +84,9 @@ class Daemon{
   // real, awaited shutdown rather than a fire-and-forget flag flip.
   async start(){
     this._syncUdevRules();
+    this.reboot.load();
     await this._ensureRegistered();
+    this.reboot.start();
     this._writePidFile();
     this._startControlSocket();
     this._startHeartbeatTimer();
@@ -102,6 +117,7 @@ class Daemon{
   }
 
   _cleanup(){
+    this.reboot.stop();
     this.controlServer?.close();
     fs.rmSync(this.config.pidFile, { force: true });
     fs.rmSync(this.config.socketPath, { force: true });
@@ -122,8 +138,14 @@ class Daemon{
           type: this.config.type,
           labels: this.config.labels,
           groups: this.config.groups,
-          hostInfo: { hostname: os.hostname(), platform: process.platform, addresses: localAddresses() },
-          capabilities: describeCapabilities(this.config)
+          // timeZone: a scheduled reboot's cron runs in it (README §10).
+          hostInfo: {
+            hostname: os.hostname(),
+            platform: process.platform,
+            addresses: localAddresses(),
+            timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone
+          },
+          capabilities: { ...describeCapabilities(this.config), rebootSupported: RebootScheduler.supported() }
         });
       writeCredentials(this.config.tokenFile, { resourceId, resourceToken });
       this.resourceId = resourceId;
@@ -170,28 +192,22 @@ class Daemon{
     await this.client.post(`/resources/${this.resourceId}/status`, {
       busy: this.localLock.locked || this.updateHold,
       source: 'local',
-      reason: this.localLock.locked ? this.localLock.reason : this.updateHold ? UPDATE_HOLD_REASON : null
+      reason: this.localLock.locked ? this.localLock.reason : this.holdReason ? HOLD_REASONS[this.holdReason] : null
     });
   }
 
-  // While the root update helper holds the host (README §10.2), take no
-  // new jobs and show as busy on the Coordinator so none is scheduled
-  // here — a job already running finishes (uploads included) first; the
-  // helper waits for that before installing and restarting every instance.
+  // While a root helper holds the host — a self-update (README §10.2) or a
+  // scheduled reboot (§10) — take no new jobs and show as busy on the
+  // Coordinator so none is scheduled here. A job already running finishes
+  // (uploads included) first; the helper waits for that before acting.
   async _syncUpdateHold(){
-    let held = false;
-    try {
-      held = Date.now() - fs.statSync(this.config.updateHoldFile).mtimeMs < UPDATE_HOLD_MAX_AGE_MS;
-    }
-    catch {
-      // no hold
-    }
-    if (held === Boolean(this.updateHold)){
+    const reason = readHold(this.config.updateHoldFile)?.reason || null;
+    if (reason === this.holdReason){
       return;
     }
-    this.updateHold = held;
+    this.holdReason = reason;
     this._touchActivity();
-    console.log(held ? 'self-update in progress: not taking new jobs' : 'self-update hold released');
+    console.log(reason ? `${HOLD_REASONS[reason]}: not taking new jobs` : 'host hold released');
     await this._reportStatus().catch((err) => console.error('status report failed:', err.message));
   }
 
@@ -251,7 +267,9 @@ class Daemon{
   _touchActivity(){
     const [state, jobId] = this.activeJobId
         ? ['job', this.activeJobId]
-        : this.localLock.locked ? ['locked', null] : this.updateHold ? ['update-hold', null] : ['idle', null],
+        : this.localLock.locked
+          ? ['locked', null]
+          : this.holdReason ? [this.holdReason === 'reboot' ? 'reboot-hold' : 'update-hold', null] : ['idle', null],
       key = `${state}:${jobId || ''}`;
     if (key !== this.activity.key){
       this.activity = { key, state, jobId, since: performance.now() };
@@ -273,7 +291,10 @@ class Daemon{
         state: this.activity.state,
         jobId: this.activity.jobId,
         durationSec: Math.round((performance.now() - this.activity.since) / 1000)
-      }
+      },
+      // The reboot schedule this Client applies — the Coordinator resends
+      // set-reboot-schedule until it matches what was saved.
+      rebootSchedule: this.reboot.cron
     });
 
     for (const command of commands || []){
@@ -295,6 +316,12 @@ class Daemon{
       }
       else if (command.command === 'cancel-update'){
         this._cancelSelfUpdate();
+      }
+      else if (command.command === 'set-reboot-schedule'){
+        this.reboot.set(command.cron);
+      }
+      else if (command.command === 'cancel-reboot'){
+        this.reboot.cancel();
       }
     }
   }
@@ -334,7 +361,9 @@ class Daemon{
   // moment it would install. The hold is host-wide, so this cancels the
   // update for every instance on the host.
   _cancelSelfUpdate(){
-    for (const file of [this.config.updateRequestFile, this.config.updateHoldFile]){
+    // Not a reboot's hold — that one is canceled with cancel-reboot.
+    const files = [this.config.updateRequestFile, ...(readHold(this.config.updateHoldFile)?.reason === 'reboot' ? [] : [this.config.updateHoldFile])];
+    for (const file of files){
       try {
         fs.rmSync(file, { force: true });
       }

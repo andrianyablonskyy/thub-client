@@ -32,6 +32,10 @@ const fs = require('node:fs'),
   UPDATE_PATH_UNIT = 'thub-client-update.path',
   UPDATE_SERVICE_UNIT = 'thub-client-update.service',
   UPDATE_HELPER = path.join(__dirname, 'self-update-helper.js'),
+  // Root-side scheduled host reboot (README §10), same pattern.
+  REBOOT_PATH_UNIT = 'thub-client-reboot.path',
+  REBOOT_SERVICE_UNIT = 'thub-client-reboot.service',
+  REBOOT_HELPER = path.join(__dirname, 'reboot-helper.js'),
   MANUAL_HINT = 'sudo npm i -g @andrian.yablonskyy/thub-client',
 
   // Device access (serial adapters, ST-Link/USB probes) and, for SW
@@ -79,7 +83,13 @@ function renderUpdateUnits(user, paths){
     // npm is a `#!/usr/bin/env node` script, so this node goes first on PATH.
     [UPDATE_SERVICE_UNIT]: fs.readFileSync(unitPath(UPDATE_SERVICE_UNIT), 'utf8')
       .replace(/^Environment=PATH=.*$/m, `Environment=PATH=${nodeDir}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`)
-      .replace(/^ExecStart=.*$/m, `ExecStart=${process.execPath} ${UPDATE_HELPER} ${paths.updateRequestFile} ${user.name} ${paths.runDir}`)
+      .replace(/^ExecStart=.*$/m, `ExecStart=${process.execPath} ${UPDATE_HELPER} ${paths.updateRequestFile} ${user.name} ${paths.runDir}`),
+    [REBOOT_PATH_UNIT]: fs.readFileSync(unitPath(REBOOT_PATH_UNIT), 'utf8')
+      .replace(/^PathExists=.*$/m, `PathExists=${paths.rebootRequestFile}`)
+      .replace(/^PathModified=.*$/m, `PathModified=${paths.rebootRequestFile}`),
+    [REBOOT_SERVICE_UNIT]: fs.readFileSync(unitPath(REBOOT_SERVICE_UNIT), 'utf8')
+      .replace(/^Environment=PATH=.*$/m, `Environment=PATH=${nodeDir}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`)
+      .replace(/^ExecStart=.*$/m, `ExecStart=${process.execPath} ${REBOOT_HELPER} ${paths.rebootRequestFile} ${paths.runDir}`)
   };
 }
 
@@ -174,8 +184,10 @@ function main(){
     }
     step = 'daemon-reload';
     execFileSync('systemctl', ['daemon-reload'], { stdio: 'ignore' });
-    step = `enable ${UPDATE_PATH_UNIT}`;
-    execFileSync('systemctl', ['enable', '--now', UPDATE_PATH_UNIT], { stdio: 'ignore' });
+    for (const unit of [UPDATE_PATH_UNIT, REBOOT_PATH_UNIT]){
+      step = `enable ${unit}`;
+      execFileSync('systemctl', ['enable', '--now', unit], { stdio: 'ignore' });
+    }
 
     step = 'list-units';
     const restart = new Set(activeInstances()),
