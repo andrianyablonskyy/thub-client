@@ -170,13 +170,18 @@ It only ever installs `thub-client`, at a strictly validated version. Logs: `jou
 
 1. Receive the job from long-poll and `accept` it.
 2. Create a fresh workspace `<workDir>/<jobId>`.
-3. **Prepare the task's inputs**: clone `--git-repo` into `work/` at its ref and depth (else an empty `work/`), and download every `--download-file` into `downloads/`.
-4. **Prepare** the DUT through the executor: HW resolves ST-Link serials and captures UARTs (nothing is flashed — the command does that); SW starts the DUT container (`--docker-image` or `sw.image`, downloads at `/downloads`).
-5. **Run** the job's `--command` with `sh -c` in `work/`, `--arg` values as `"$@"`, and the environment: `THUB_DUT_*`, `THUB_DOWNLOAD_<n>`/`THUB_DOWNLOADS_DIR`/`THUB_DOWNLOADS`, `THUB_GIT_COMMIT`, `THUB_JOB_ID`, `THUB_SUITE`, `THUB_WORK_DIR`, one `THUB_META_<KEY>` per job metadata field. Its exit code is the verdict.
-6. Collect results (JUnit XML, console log, anything left in `work/artifacts/`).
-7. Upload artifacts, post the result, clean the workspace, report `IDLE`.
+3. **Log in to the job's registry**, if its `--env` has `DOCKER_REGISTRY`, `DOCKER_USERNAME` and `DOCKER_PASSWORD`: `echo "$DOCKER_PASSWORD" | docker login "$DOCKER_REGISTRY" --username "$DOCKER_USERNAME" --password-stdin`, into `<workDir>/<jobId>/docker` (mode `0700`) — a Docker config of the job's own, never the service user's. A failed login ends the job as ERROR.
+4. **Prepare the task's inputs**: clone `--git-repo` into `work/` at its ref and depth (else an empty `work/`), and download every `--download-file` into `downloads/`.
+5. **Prepare** the DUT through the executor: HW resolves ST-Link serials and captures UARTs (nothing is flashed — the command does that); SW starts the DUT container (`--docker-image` or `sw.image`, downloads at `/downloads`), pulled with the job's registry login when it comes from `DOCKER_REGISTRY`.
+6. **Run** the job's `--command` with `sh -c` in `work/`, `--arg` values as `"$@"`, and the environment: the job's `--env` variables, `DOCKER_CONFIG` (after a registry login), `THUB_DUT_*`, `THUB_DOWNLOAD_<n>`/`THUB_DOWNLOADS_DIR`/`THUB_DOWNLOADS`, `THUB_GIT_COMMIT`, `THUB_JOB_ID`, `THUB_SUITE`, `THUB_WORK_DIR`, one `THUB_META_<KEY>` per job metadata field. Its exit code is the verdict.
+7. Collect results: everything in `work/results/` and `work/artifacts/`, plus `flash.log` / `console.log`. JUnit XML among them is summed into the job's `summary` (total/passed/failed/skipped). The verdict stays the exit code.
+8. Upload artifacts, post the result, delete the workspace (the registry login with it), report `IDLE`.
 
-A cancel command or job timeout sends `SIGTERM` to the test process group, waits 10s, then `SIGKILL`, and always runs executor teardown. If `spec.dryRun` is set, steps 2–6 are replaced with log lines describing what would have happened — no download or clone, no executor, no command.
+The job's `--env` variables are set for **every** command above — the git commands of step 4, the login, the DUT setup, `--command` — on top of the service's own environment. `THUB_*`, `GIT_TERMINAL_PROMPT`, `GIT_ALLOW_PROTOCOL` and `DOCKER_CONFIG` can't be set this way. The values come from the Coordinator with the job, and the Client never logs them: the login line shows the registry and user, not the password.
+
+**Docker from the command.** The command runs on the Client host, as the service user. To run tests inside an image it starts the container itself (`docker run --rm -v "$THUB_WORK_DIR:/work" -w /work <image> …`, logged in through `DOCKER_CONFIG`), which needs Docker on the host and the service user in the `docker` group. SW hosts are set up that way (see *Ubuntu 26.04 host setup*); an HW host needs it added. Examples: the Agent README, *Docker*.
+
+A cancel command or job timeout sends `SIGTERM` to the test process group, waits 10s, then `SIGKILL`, and always runs executor teardown. If `spec.dryRun` is set, nothing is executed. Instead the job's log lists every command the real job would run on this Client, in full and in order: the job's `--env` (secret-looking values masked), the registry login, each git command with its `--git-options`, the downloads, the DUT setup, and `cd <work> && sh -c …` with its environment. It adds `WOULD FAIL:` lines for anything this Client's config would refuse.
 
 ### HW executor
 
