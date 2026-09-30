@@ -19,6 +19,7 @@ const fs = require('node:fs'),
   { JOB_STATES, JOB_ENV_MASK } = require('@andrian.yablonskyy/thub-common'),
   { prepareTask, planTask, shellQuote, shellJoin } = require('./downloader'),
   { LogShipper } = require('./log-shipper'),
+  { jobParamsEnv, envKey } = require('./job-params-env'),
   { HwExecutor } = require('./executors/hw'),
   { SwExecutor } = require('./executors/sw');
 
@@ -239,7 +240,7 @@ class JobRunner{
       logShipper.push('runner', `running: ${describeCommand(job.spec)}`);
       this.child = spawn('sh', commandArgs(job.spec), {
         cwd: task.workDir,
-        env: { ...process.env, ...jobEnv(job, task, executor.envFor()) }
+        env: { ...process.env, ...jobEnv(job, task, executor.envFor(), this.config.name) }
       });
       this.child.stdout.on('data', (d) => logShipper.push('runner', d.toString('utf8').trimEnd()));
       this.child.stderr.on('data', (d) => logShipper.push('runner', d.toString('utf8').trimEnd()));
@@ -259,11 +260,13 @@ function commandArgs(spec){
 }
 
 // What the job's command gets on top of the Client's own environment: its
-// --env as given (no name means anything to the Client), then the Client's
-// own THUB_* (the job spec refuses those names).
-function jobEnv(job, task, executorEnv){
+// --env as given (no name means anything to the Client), its parameters as
+// JOB_* (job-params-env.js), then the Client's own THUB_* (the job spec
+// refuses both prefixes in --env).
+function jobEnv(job, task, executorEnv, clientName){
   return {
     ...job.spec.env,
+    ...jobParamsEnv(job.spec, { clientName }),
     ...executorEnv,
     ...metaToEnv(job.spec.meta),
     ...downloadsEnv(task),
@@ -281,7 +284,7 @@ function dryRunPlan(job, jobDir, config){
     executor = spec.target.type === 'hw' ? new HwExecutor(config, null) : new SwExecutor(config, null),
     { task, steps: inputs } = planTask(spec, jobDir),
     dut = executor.plan(job, task.downloads.length ? task.downloadsDir : null),
-    env = jobEnv(job, { ...task, git: Boolean(spec.git) }, dut.env),
+    env = jobEnv(job, { ...task, git: Boolean(spec.git) }, dut.env, config.name),
     jobEnvNames = Object.keys(spec.env || {}),
     section = (title, lines) => (lines.length ? [`${title}:`, ...lines.map((l) => `  ${l}`)] : []);
   return [
@@ -332,11 +335,7 @@ function metaToEnv(meta){
     if (typeof value !== 'string' && typeof value !== 'number' && typeof value !== 'boolean'){
       continue;
     }
-    const envKey = key
-      .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
-      .replace(/[^A-Za-z0-9]+/g, '_')
-      .toUpperCase();
-    env[`THUB_META_${envKey}`] = String(value);
+    env[`THUB_META_${envKey(key)}`] = String(value);
   }
   return env;
 }
