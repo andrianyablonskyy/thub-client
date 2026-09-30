@@ -117,13 +117,10 @@ class JobRunner{
         return this._bail(job, executor, logShipper);
       }
 
-      const artifactsDir = path.join(task.workDir, 'artifacts'),
-        resultFiles = collectResultFiles(task.workDir, artifactsDir);
-      if (resultFiles.length){
-        await this.client.postArtifacts(job.id, resultFiles);
-      }
-
-      const summary = summarizeJUnit(resultFiles.filter((f) => f.endsWith('.xml'))),
+      // Nothing is uploaded (README §8.1): the job's files stay in its
+      // workspace, deleted when it ends. The JUnit counts are read here and
+      // reported with the result; the verdict is still the exit code.
+      const summary = summarizeJUnit(junitFiles(task.workDir)),
         state = exitCode === 0 ? JOB_STATES.PASSED : JOB_STATES.FAILED;
       await logShipper.drain().catch(() => {}); // all output in before the stream ends
       await this.client.post(`/jobs/${job.id}/result`, { state, exitCode, summary });
@@ -170,8 +167,8 @@ class JobRunner{
   }
 
   // Dry run (§7.1): walks the same job lifecycle and API calls as a real
-  // job — accept, PREPARING/RUNNING transitions, log lines, an artifact,
-  // a result — but never downloads or clones anything, never touches an
+  // job — accept, PREPARING/RUNNING transitions, log lines, a result —
+  // but never downloads or clones anything, never touches an
   // executor (no Docker, no ST-Link/serial), and never runs the command.
   // Instead it logs every command the real job would run on this Client,
   // in full (git with its --git-options, the executor's, the job's own with
@@ -203,9 +200,6 @@ class JobRunner{
       }
 
       logShipper.push('runner', '[dry-run] done — no real verdict; reporting PASSED');
-      const reportPath = path.join(jobDir, 'dry-run-report.txt');
-      fs.writeFileSync(reportPath, dryRunReport(job, plan));
-      await this.client.postArtifacts(job.id, [reportPath]);
 
       await this.client.post(`/jobs/${job.id}/result`, {
         state: JOB_STATES.PASSED,
@@ -340,24 +334,12 @@ function metaToEnv(meta){
   return env;
 }
 
-function collectResultFiles(testsDir, artifactsDir){
-  const files = [];
-  for (const name of ['flash.log', 'console.log']){
-    const p = path.join(testsDir, name);
-    if (fs.existsSync(p)){
-      files.push(p);
-    }
-  }
-  const results = path.join(testsDir, 'results');
-  for (const dir of [results, artifactsDir]){
-    if (!fs.existsSync(dir)){
-      continue;
-    }
-    for (const f of fs.readdirSync(dir)){
-      files.push(path.join(dir, f));
-    }
-  }
-  return files;
+// JUnit XML the tests left in results/ or artifacts/ of the work directory.
+function junitFiles(workDir){
+  return ['results', 'artifacts'].flatMap((name) => {
+    const dir = path.join(workDir, name);
+    return fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => f.endsWith('.xml')).map((f) => path.join(dir, f)) : [];
+  });
 }
 
 function summarizeJUnit(xmlFiles){
@@ -374,21 +356,6 @@ function summarizeJUnit(xmlFiles){
     }
   }
   return { total, passed: Math.max(total - failed - skipped, 0), failed, skipped };
-}
-
-function dryRunReport(job, plan){
-  return (
-    'TestHub dry run — no commands were executed on this Client.\n\n' +
-    `job:      ${job.id}\n` +
-    (job.spec.user ? `user:     ${job.spec.user}\n` : '') +
-    `target:   ${job.spec.target.type} labels=${(job.spec.target.labels || []).join(',') || '(none)'}\n` +
-    `downloads: ${(job.spec.downloads || []).map((d) => d.url).join(', ') || '(none)'}\n` +
-    `git:      ${job.spec.git ? describeGit(job.spec.git) : '(none)'}\n` +
-    `image:    ${job.spec.image || '(Client default)'}\n` +
-    `command:  ${describeCommand(job.spec)} (suite=${job.spec.suite || 'default'})\n` +
-    `meta:     ${JSON.stringify(job.spec.meta || {})}\n\n` +
-    `${plan.join('\n')}\n`
-  );
 }
 
 function sleep(ms){
