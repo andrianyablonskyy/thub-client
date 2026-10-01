@@ -36,12 +36,10 @@ function repeated(name, values, sep){
 function jobParamsEnv(spec, { clientName } = {}){
   const target = spec.target || {},
     labels = target.labels || [],
-    board = labels.find((l) => l.startsWith('board:')),
     git = spec.git,
     set = (name, value) => (value === undefined || value === null || value === '' ? {} : { [name]: String(value) });
   return {
     ...set('JOB_TYPE', target.type),
-    ...set('JOB_BOARD', board && board.slice('board:'.length)),
     ...repeated('JOB_LABEL', labels, ','),
     ...set('JOB_GROUP', target.group),
     ...set('JOB_CLIENT', target.client ? clientName || target.client : undefined),

@@ -37,7 +37,6 @@ test('every parameter that reaches the Client, as JOB_<NAME>', () => {
   }), { clientName: 'HIL-4' });
   assert.deepEqual(env, {
     JOB_TYPE: 'sw',
-    JOB_BOARD: 'nucleo-f401re',
     JOB_LABEL: 'board:nucleo-f401re,uart', JOB_LABEL_1: 'board:nucleo-f401re', JOB_LABEL_2: 'uart',
     JOB_GROUP: 'g-1',
     JOB_CLIENT: 'HIL-4',
