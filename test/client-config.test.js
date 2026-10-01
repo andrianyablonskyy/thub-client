@@ -183,3 +183,10 @@ test('a Groups-tab revision writes `groups` into the config file, keeping the re
   assert.deepEqual(written.labels, ['a']);
   assert.equal(written.joinKey, 'jk_0123456789abcdef');
 });
+
+test('the config file reported for Export never carries the joinKey', () => {
+  const file = configFile({ type: 'hw', name: 'dut1', labels: ['board:x'] }),
+    shared = readShareableConfigFile(file);
+  assert.equal(shared.joinKey, undefined);
+  assert.deepEqual([shared.coordinatorUrl, shared.name, shared.labels], ['http://x', 'dut1', ['board:x']]);
+});

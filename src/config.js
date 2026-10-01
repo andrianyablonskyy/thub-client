@@ -271,8 +271,11 @@ function readEditableConfig(configPath, type){
 
 // The whole config file as it's shared (legacy sections left out) —
 // reported at registration for the dashboard's Export.
+// The config file as reported to the Coordinator (for the dashboard's
+// Export): legacy sections dropped, and never the joinKey.
 function readShareableConfigFile(configPath){
-  return shareableClientConfigFile(JSON.parse(fs.readFileSync(configPath, 'utf8')) || {});
+  const { joinKey, ...file } = shareableClientConfigFile(JSON.parse(fs.readFileSync(configPath, 'utf8')) || {});
+  return file;
 }
 
 const pick = (obj, keys) => Object.fromEntries(keys.filter((k) => obj[k] !== undefined && obj[k] !== '').map((k) => [k, obj[k]]));

@@ -173,6 +173,15 @@ class Daemon{
     }
     this.resourceId = creds.resourceId;
     this.client = new ClientApiClient({ baseUrl: this.config.coordinatorUrl, token: creds.resourceToken });
+    // Not re-registering, so report the config here: the dashboard's Export,
+    // Import and config tabs work from it. A Coordinator older than this
+    // endpoint just doesn't have it.
+    try {
+      await this.client.post(`/resources/${this.resourceId}/config-report`, { config: this._editableConfig(), configFile: this._shareableConfigFile() });
+    }
+    catch (err){
+      console.warn(`config: couldn't report it to the Coordinator: ${err.message}`);
+    }
   }
 
   _startControlSocket(){
