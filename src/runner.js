@@ -121,9 +121,10 @@ class JobRunner{
       // workspace, deleted when it ends. The JUnit counts are read here and
       // reported with the result; the verdict is still the exit code.
       const summary = summarizeJUnit(junitFiles(task.workDir)),
+        artifacts = readArtifactsList(artifactsFile(task), (line) => logShipper.push('runner', line)),
         state = exitCode === 0 ? JOB_STATES.PASSED : JOB_STATES.FAILED;
       await logShipper.drain().catch(() => {}); // all output in before the stream ends
-      await this.client.post(`/jobs/${job.id}/result`, { state, exitCode, summary });
+      await this.client.post(`/jobs/${job.id}/result`, { state, exitCode, summary, ...(artifacts ? { artifacts } : {}) });
       this._announce(state);
       this._announceFinished(state);
     }
@@ -267,6 +268,7 @@ function jobEnv(job, task, executorEnv, clientName){
     THUB_JOB_ID: job.id,
     THUB_SUITE: job.spec.suite || 'default',
     THUB_WORK_DIR: task.workDir,
+    THUB_ARTIFACTS_FILE: artifactsFile(task),
     ...(task.git || task.commit ? { THUB_GIT_COMMIT: task.commit || '<checked-out commit>' } : {})
   };
 }
@@ -334,6 +336,46 @@ function metaToEnv(meta){
   return env;
 }
 
+// Where the command may list the artifacts it published elsewhere (README
+// §7.3): a JSON array of {name, size, link, timestamp}, next to the work
+// directory rather than in it, so it's never part of the git checkout.
+function artifactsFile(task){
+  return path.join(path.dirname(task.workDir), 'artifacts.json');
+}
+
+const ARTIFACTS_FILE_MAX_BYTES = 1024 * 1024;
+
+// The list, as the command wrote it, for the result — the Coordinator checks
+// each entry. A missing file is no list; a broken one is said so in the
+// job's log and doesn't change the verdict.
+function readArtifactsList(file, log){
+  let text;
+  try {
+    if (fs.statSync(file).size > ARTIFACTS_FILE_MAX_BYTES){
+      log(`THUB_ARTIFACTS_FILE ignored: larger than ${ARTIFACTS_FILE_MAX_BYTES / 1024} KB`);
+      return undefined;
+    }
+    text = fs.readFileSync(file, 'utf8');
+  }
+  catch {
+    return undefined; // the job reported none
+  }
+  let list;
+  try {
+    list = JSON.parse(text);
+  }
+  catch (err){
+    log(`THUB_ARTIFACTS_FILE ignored: not valid JSON (${err.message})`);
+    return undefined;
+  }
+  if (!Array.isArray(list)){
+    log('THUB_ARTIFACTS_FILE ignored: it must hold a JSON array of {"name", "size", "link", "timestamp"}');
+    return undefined;
+  }
+  log(`reported ${list.length} artifact(s)`);
+  return list;
+}
+
 // JUnit XML the tests left in results/ or artifacts/ of the work directory.
 function junitFiles(workDir){
   return ['results', 'artifacts'].flatMap((name) => {
@@ -362,4 +404,4 @@ function sleep(ms){
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-module.exports = { JobRunner, dryRunPlan };
+module.exports = { JobRunner, dryRunPlan, readArtifactsList, jobEnv };
