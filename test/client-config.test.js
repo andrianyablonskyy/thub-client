@@ -172,3 +172,14 @@ test('the unit gives jobs a PATH with /snap/bin (systemd\'s default has none)', 
   assert.match(unit, /^Environment=PATH=.*:\/usr\/bin:.*\/snap\/bin$/m);
   assert.match(installer, /\.replace\(\/\^Environment=PATH=\.\*\$\/m, `Environment=PATH=\$\{JOB_PATH\}`\)/);
 });
+
+test('a Groups-tab revision writes `groups` into the config file, keeping the rest', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'thub-groups-')),
+    file = path.join(dir, 'dut0.json');
+  fs.writeFileSync(file, JSON.stringify({ coordinatorUrl: 'http://c', type: 'sw', joinKey: 'jk_0123456789abcdef', labels: ['a'], groups: ['old'] }));
+  applyEditableConfig(file, 'sw', {}, { groups: ['g1', 'g2'] });
+  const written = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.deepEqual(written.groups, ['g1', 'g2']);
+  assert.deepEqual(written.labels, ['a']);
+  assert.equal(written.joinKey, 'jk_0123456789abcdef');
+});
