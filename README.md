@@ -101,12 +101,12 @@ If two instances instead share the exact same config file (told apart only by `n
 | `pidFile` | No | `<runDir>/<instance>.pid` | PID file `thub-client stop`/`restart` use to find the daemon. |
 | `clientIdFile` | No | `<varDir>/<instance>/.client-id` | Where the stable identity UUID is persisted, unless `clientId` is set. |
 | `clientId` | No | — | Explicit identity UUID, skipping `clientIdFile`. Also settable as `THUB_CLIENT_ID`. |
-| `heartbeatIntervalSec` | No | `10` | How often the daemon heartbeats. |
+| `heartbeatIntervalSec` | No | `10` | How often the daemon heartbeats until the Coordinator says otherwise: it sends its `heartbeat.intervalSec` at registration and in every heartbeat reply, and the Client follows it from then on (a change on the Coordinator's dashboard reaches it within one heartbeat). Only an older Coordinator that sends none leaves this value in charge. |
 | `longPollWaitSec` | No | `30` | How long each job long-poll waits before returning `204`. |
 
 **Capabilities.** At every registration (each start/restart) the Client reports what this config lets it drive: for HW each `hw-devices.stlinks`/`uarts`/`usbs` device (path, ST-Link serial, UART baud rate, and whether the device node exists right now); for SW the image, its source and the CPU/memory limits. The Coordinator's resource card lists them and flags a configured device that's missing. After plugging in or moving an adapter, restart the instance to refresh them.
 
-**Heartbeats** (every `heartbeatIntervalSec`) report the state, the host's network addresses, the host's uptime and the current activity (idle, running a job until it's fully finished including uploads, locked locally, or held for a self-update) with its duration — shown on the Coordinator's resource card.
+**Heartbeats** (every `heartbeat.intervalSec` of the Coordinator) report the state, the host's network addresses, the host's uptime and the current activity (idle, running a job until it's fully finished including uploads, locked locally, or held for a self-update) with its duration — shown on the Coordinator's resource card.
 
 **SW Clients** (`type: sw`) have no settings of their own: each job brings its DUT image (`--docker-image`), pulled with `docker pull` as the service user from the registry its reference names (Docker Hub for a short name) — a private registry needs that user's own `docker login` on the host, once. An older file's `sw` section is ignored.
 

@@ -140,7 +140,7 @@ class Daemon{
   async _ensureRegistered(){
     if (this.config.joinKey){
       const anon = new ClientApiClient({ baseUrl: this.config.coordinatorUrl, token: this.config.joinKey }),
-        { resourceId, resourceToken } = await anon.post('/resources/register', {
+        { resourceId, resourceToken, heartbeatIntervalSec } = await anon.post('/resources/register', {
           clientId: this.config.clientId,
           name: this.config.name,
           type: this.config.type,
@@ -163,6 +163,7 @@ class Daemon{
       this.resourceId = resourceId;
       this.client = new ClientApiClient({ baseUrl: this.config.coordinatorUrl, token: resourceToken });
       console.log(`Registered as resource ${resourceId}`);
+      this._adoptHeartbeatInterval(heartbeatIntervalSec);
       return;
     }
 
@@ -246,8 +247,32 @@ class Daemon{
     tick(); // fire immediately — setInterval alone would leave a freshly
     // (re)started daemon looking OUT_OF_SERVICE/stale for up to a full
     // heartbeatIntervalSec before its first heartbeat.
-    this.heartbeatTimer = setInterval(tick, this.config.heartbeatIntervalSec * 1000);
+    this.heartbeatTick = tick;
+    this.heartbeatTimer = setInterval(tick, this._heartbeatMs());
     this.heartbeatTimer.unref?.();
+  }
+
+  // The Coordinator decides the heartbeat interval (its heartbeat.intervalSec,
+  // changeable from its dashboard, README §13.2): it sends it at
+  // registration and in every heartbeat reply, and this Client follows it
+  // from then on. Its own heartbeatIntervalSec is only the starting value,
+  // and what an older Coordinator that sends none gets.
+  _heartbeatMs(){
+    return (this.heartbeatIntervalSec || this.config.heartbeatIntervalSec) * 1000;
+  }
+
+  _adoptHeartbeatInterval(sec){
+    const n = Number(sec);
+    if (!Number.isInteger(n) || n < 1 || n > 3600 || n === (this.heartbeatIntervalSec || this.config.heartbeatIntervalSec)){
+      return;
+    }
+    this.heartbeatIntervalSec = n;
+    console.log(`Heartbeat interval: ${n}s (from the Coordinator)`);
+    if (this.heartbeatTimer){
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = setInterval(this.heartbeatTick, this._heartbeatMs());
+      this.heartbeatTimer.unref?.();
+    }
   }
 
   // Long-polls for work when idle and unlocked, or just runs a job to
@@ -268,7 +293,7 @@ class Daemon{
           break;
         } // aborted on purpose by stop()
         console.error('poll error:', err.message);
-        await sleep(this.config.heartbeatIntervalSec * 1000);
+        await sleep(this._heartbeatMs());
       }
     }
   }
@@ -289,7 +314,7 @@ class Daemon{
   }
 
   async _heartbeat(){
-    const { commands } = await this.client.post(`/resources/${this.resourceId}/heartbeat`, {
+    const { commands, heartbeatIntervalSec } = await this.client.post(`/resources/${this.resourceId}/heartbeat`, {
       state: this.activeJobId || this.localLock.locked || this.updateHold ? 'busy' : 'idle',
       activeJobId: this.activeJobId,
       localLock: this.localLock.locked || this.updateHold,
@@ -312,6 +337,8 @@ class Daemon{
       configRevision: this.configState.revision,
       configError: this.configState.error
     });
+
+    this._adoptHeartbeatInterval(heartbeatIntervalSec);
 
     for (const command of commands || []){
       if (command.command === 'cancel-job' && command.jobId === this.activeJobId){
