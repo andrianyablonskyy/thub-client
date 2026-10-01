@@ -383,7 +383,7 @@ class Daemon{
       else if (command.command === 'set-config'){
         this._applyConfig(command);
       }
-      // "Connected USB devices" Refresh on the resource card: lsusb, answered
+      // "USB devices" Refresh on the resource card: lsusb, answered
       // right away rather than with the next heartbeat.
       else if (command.command === 'scan-usb'){
         this._scanUsb(command.requestId);
