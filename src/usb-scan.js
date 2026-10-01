@@ -1,6 +1,6 @@
 /**
  * @file        packages/client/src/usb-scan.js
- * @description Runs `lsusb -tvv` for the Coordinator's scan-usb command (resource card "Connected USB devices" tab)
+ * @description Runs `lsusb -tvv` for the Coordinator's scan-usb command (resource card "USB devices" tab)
  *
  * @author      Andrian Yablonskyy
  * @copyright   Copyright (c) 2026 Andrian Yablonskyy. All rights reserved.
