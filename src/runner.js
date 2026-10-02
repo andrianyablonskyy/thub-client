@@ -92,8 +92,8 @@ class JobRunner{
     try {
       await this.client.post(`/jobs/${job.id}/accept`);
 
-      // The task's inputs first: its git checkout (where the command runs)
-      // and its downloaded files (README §8.1).
+      // The task's inputs first: its downloaded files (README §8.1). A git
+      // checkout or a container is the command's own business.
       const task = await prepareTask(job.spec, jobDir, {
         signal: this.abort.signal,
         log: (line) => logShipper.push('runner', line)
@@ -169,14 +169,13 @@ class JobRunner{
 
   // Dry run (§7.1): walks the same job lifecycle and API calls as a real
   // job — accept, PREPARING/RUNNING transitions, log lines, a result —
-  // but never downloads or clones anything, never touches an
-  // executor (no Docker, no ST-Link/serial), and never runs the command.
-  // Instead it logs every command the real job would run on this Client,
-  // in full (git with its --git-options, the executor's, the job's own with
-  // its working directory and environment), plus what this Client's config
-  // would refuse. Useful for proving the Coordinator<->Client plumbing
-  // end-to-end, and checking a job, without real hardware, a real emulator
-  // image, or reachable download servers.
+  // but never downloads anything, never touches an executor (no
+  // ST-Link/serial), and never runs the command. Instead it logs every step
+  // the real job would take on this Client (the downloads, the HW
+  // executor's, the job's command with its working directory and
+  // environment), plus what this Client's config would refuse. Useful for
+  // proving the Coordinator<->Client plumbing end-to-end, and checking a
+  // job, without real hardware or reachable download servers.
   async _runDryRun(job, jobDir, logShipper){
     try {
       await this.client.post(`/jobs/${job.id}/accept`);
@@ -229,7 +228,7 @@ class JobRunner{
   // The task's entry point: `sh -c <command>` in the work directory, --arg
   // values as "$@", with the job's environment — the DUT (THUB_DUT_*), its
   // downloads (THUB_DOWNLOADS_DIR, THUB_DOWNLOAD_<n>, THUB_DOWNLOADS), the
-  // checkout's commit, the suite and --meta values.
+  // suite and --meta values.
   _runCommand(job, task, executor, logShipper){
     return new Promise((resolve, reject) => {
       logShipper.push('runner', `running: ${describeCommand(job.spec)}`);
@@ -268,8 +267,7 @@ function jobEnv(job, task, executorEnv, clientName){
     THUB_JOB_ID: job.id,
     THUB_SUITE: job.spec.suite || 'default',
     THUB_WORK_DIR: task.workDir,
-    THUB_ARTIFACTS_FILE: artifactsFile(task),
-    ...(task.git || task.commit ? { THUB_GIT_COMMIT: task.commit || '<checked-out commit>' } : {})
+    THUB_ARTIFACTS_FILE: artifactsFile(task)
   };
 }
 
@@ -280,7 +278,7 @@ function dryRunPlan(job, jobDir, config){
     executor = spec.target.type === 'hw' ? new HwExecutor(config, null) : new SwExecutor(config, null),
     { task, steps: inputs } = planTask(spec, jobDir),
     dut = executor.plan(job, task.downloads.length ? task.downloadsDir : null),
-    env = jobEnv(job, { ...task, git: Boolean(spec.git) }, dut.env, config.name),
+    env = jobEnv(job, task, dut.env, config.name),
     jobEnvNames = Object.keys(spec.env || {}),
     section = (title, lines) => (lines.length ? [`${title}:`, ...lines.map((l) => `  ${l}`)] : []);
   return [
@@ -289,7 +287,7 @@ function dryRunPlan(job, jobDir, config){
     // --env values are treated as secrets whatever their names: never logged.
     ...section('job environment (--env, values hidden), for every command below', jobEnvNames.map((k) => `${k}=${JOB_ENV_MASK}`)),
     ...section('task inputs', inputs),
-    ...section(spec.target.type === 'hw' ? 'DUT (HW executor)' : 'DUT (SW executor, docker CLI equivalent)', dut.steps),
+    ...section('DUT (HW executor)', dut.steps),
     ...section('command', [
       `cd ${shellQuote(task.workDir)}`,
       ...Object.entries(env).filter(([k]) => !jobEnvNames.includes(k)).map(([k, v]) => `export ${k}=${shellQuote(v)}`),
@@ -298,10 +296,6 @@ function dryRunPlan(job, jobDir, config){
     ...section('then, whatever the result', dut.teardown),
     ...(dut.problems || []).map((p) => `WOULD FAIL: ${p}`)
   ];
-}
-
-function describeGit(git){
-  return `${git.url} (${git.ref || 'default branch'}, depth ${git.depth ?? 1})`;
 }
 
 function describeCommand(spec){
@@ -338,7 +332,7 @@ function metaToEnv(meta){
 
 // Where the command may list the artifacts it published elsewhere (README
 // §7.3): a JSON array of {name, size, link, timestamp}, next to the work
-// directory rather than in it, so it's never part of the git checkout.
+// directory rather than in it, so it's never mixed with what the command clones there.
 function artifactsFile(task){
   return path.join(path.dirname(task.workDir), 'artifacts.json');
 }

@@ -30,8 +30,6 @@ test('every parameter that reaches the Client, as JOB_<NAME>', () => {
     target: { type: 'sw', labels: ['board:nucleo-f401re', 'uart'], group: 'g-1', client: 'res_1' },
     user: 'Alice', args: ['--junit', 'fast'], suite: 'smoke', timeoutSec: 600, priority: 70,
     downloads: [{ url: 'https://art/app.bin' }, { url: 'https://art/tests.tgz' }],
-    image: 'registry.lab:5000/emu:1',
-    git: { url: 'git@bitbucket.org:team/tests.git', ref: 'main', depth: 20, options: '-c core.sshCommand="ssh -i /k"' },
     meta: { ciJobId: 42, repo: 'team/fw', nested: { x: 1 } },
     env: { SECRET: 'x' }
   }), { clientName: 'HIL-4' });
@@ -43,8 +41,6 @@ test('every parameter that reaches the Client, as JOB_<NAME>', () => {
     JOB_USER: 'Alice',
     JOB_COMMAND: './run.sh',
     JOB_DOWNLOAD_FILE: 'https://art/app.bin\nhttps://art/tests.tgz', JOB_DOWNLOAD_FILE_1: 'https://art/app.bin', JOB_DOWNLOAD_FILE_2: 'https://art/tests.tgz',
-    JOB_DOCKER_IMAGE: 'registry.lab:5000/emu:1',
-    JOB_GIT_REPO_URL: 'git@bitbucket.org:team/tests.git', JOB_GIT_BRANCH: 'main', JOB_GIT_DEPTH: '20', JOB_GIT_OPTIONS: '-c core.sshCommand="ssh -i /k"',
     JOB_SUITE: 'smoke',
     JOB_ARG: '--junit fast', JOB_ARG_1: '--junit', JOB_ARG_2: 'fast',
     JOB_TIMEOUT: '600',
@@ -53,27 +49,22 @@ test('every parameter that reaches the Client, as JOB_<NAME>', () => {
   });
 });
 
-test('parameters not given leave their variables unset; a git repo without a ref or depth gets depth 1, no branch', () => {
-  const env = jobParamsEnv(spec({ target: { type: 'hw' }, git: { url: 'https://git.lab/r.git' } }));
-  assert.deepEqual(Object.keys(env).sort(),
-    ['JOB_COMMAND', 'JOB_GIT_DEPTH', 'JOB_GIT_REPO_URL', 'JOB_PRIORITY', 'JOB_SUITE', 'JOB_TIMEOUT', 'JOB_TYPE']);
-  assert.equal(env.JOB_GIT_DEPTH, '1');
+test('parameters not given leave their variables unset', () => {
+  const env = jobParamsEnv(spec({ target: { type: 'hw' } }));
+  assert.deepEqual(Object.keys(env).sort(), ['JOB_COMMAND', 'JOB_PRIORITY', 'JOB_SUITE', 'JOB_TIMEOUT', 'JOB_TYPE']);
 });
 
-test('the command sees them — e.g. to clone the repo itself', async () => {
+test('the command sees them', async () => {
   const jobDir = fs.mkdtempSync(path.join(os.tmpdir(), 'thub-jp-')),
-    task = { workDir: path.join(jobDir, 'work'), downloadsDir: path.join(jobDir, 'downloads'), downloads: [], commit: null },
+    task = { workDir: path.join(jobDir, 'work'), downloadsDir: path.join(jobDir, 'downloads'), downloads: [] },
     lines = [],
-    job = { id: 'M-1', spec: spec({
-      target: { type: 'hw' }, git: { url: 'https://git.lab/r.git', ref: 'dev', depth: 5 },
-      command: 'echo "git clone --depth $JOB_GIT_DEPTH --branch $JOB_GIT_BRANCH $JOB_GIT_REPO_URL"'
-    }) };
+    job = { id: 'M-1', spec: spec({ target: { type: 'hw', labels: ['uart'] }, suite: 'smoke', command: 'echo "suite=$JOB_SUITE labels=$JOB_LABEL"' }) };
   fs.mkdirSync(task.workDir);
   await new JobRunner(null, { name: 'HIL-4' })._runCommand(job, task, { envFor: () => ({}) }, { push: (s, l) => lines.push(l) });
-  assert.ok(lines.includes('git clone --depth 5 --branch dev https://git.lab/r.git'), lines.join('\n'));
+  assert.ok(lines.includes('suite=smoke labels=uart'), lines.join('\n'));
 });
 
 test('a dry run lists them with the rest of the command\'s environment', () => {
-  const plan = dryRunPlan({ id: 'M-2', spec: spec({ target: { type: 'hw' }, git: { url: 'https://git.lab/r.git', ref: 'dev' } }) }, '/w/M-2', {});
-  assert.ok(plan.includes('  export JOB_GIT_REPO_URL=https://git.lab/r.git') && plan.includes('  export JOB_GIT_BRANCH=dev'), plan.join('\n'));
+  const plan = dryRunPlan({ id: 'M-2', spec: spec({ target: { type: 'hw', labels: ['uart'] }, suite: 'smoke' }) }, '/w/M-2', {});
+  assert.ok(plan.includes('  export JOB_SUITE=smoke') && plan.includes('  export JOB_LABEL=uart'), plan.join('\n'));
 });

@@ -19,8 +19,6 @@ const test = require('node:test'),
   fs = require('node:fs'),
   os = require('node:os'),
   path = require('node:path'),
-  { cloneRepo } = require('../src/downloader'),
-  { SwExecutor, imageSource } = require('../src/executors/sw'),
   { JobRunner, dryRunPlan } = require('../src/runner');
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'thub-env-')),
@@ -37,19 +35,30 @@ function fakeTool(dir, name, { out = '', readStdin = false } = {}){
   return () => (fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim().split('\n') : []);
 }
 
-test('job env: git commands get it (under git\'s safety settings)', async () => {
+test('a git clone is the command\'s own: it gets the token from --env', async () => {
   const bin = tmp(),
-    calls = fakeTool(bin, 'git', { out: 'abc123' }),
-    env = { JOB_MARK: 'm1', PATH: `${bin}:${process.env.PATH}` };
-  assert.equal(await cloneRepo({ url: 'https://git.lab/r.git' }, path.join(tmp(), 'work'), { env }), 'abc123');
-  assert.ok(calls().length >= 4 && calls().every((l) => l.includes('mark=m1')), calls().join('\n'));
+    calls = fakeTool(bin, 'git'),
+    jobDir = tmp(),
+    task = { workDir: path.join(jobDir, 'work'), downloadsDir: path.join(jobDir, 'downloads'), downloads: [] },
+    lines = [],
+    job = {
+      id: 'M-3',
+      spec: {
+        command: 'git clone --depth 1 "https://x-access-token:$GH_TOKEN@github.com/org/tests.git" .',
+        env: { GH_TOKEN: 'ghp_secret', PATH: `${bin}:${process.env.PATH}` }
+      }
+    };
+  fs.mkdirSync(task.workDir);
+  const code = await new JobRunner(null, {})._runCommand(job, task, { envFor: () => ({}) }, { push: (s, l) => lines.push(l) });
+  assert.equal(code, 0, lines.join('\n'));
+  assert.deepEqual(calls(), ['args=clone --depth 1 https://x-access-token:ghp_secret@github.com/org/tests.git . mark= stdin=']);
 });
 
 test('the command gets the job env as given — its own docker login works with any names; the Client adds nothing', async () => {
   const bin = tmp(),
     calls = fakeTool(bin, 'docker', { readStdin: true }),
     jobDir = tmp(),
-    task = { workDir: path.join(jobDir, 'work'), downloadsDir: path.join(jobDir, 'downloads'), downloads: [], commit: null },
+    task = { workDir: path.join(jobDir, 'work'), downloadsDir: path.join(jobDir, 'downloads'), downloads: [] },
     lines = [],
     job = {
       id: 'M-1',
@@ -64,25 +73,6 @@ test('the command gets the job env as given — its own docker login works with 
   assert.equal(code, 0, lines.join('\n'));
   assert.deepEqual(calls(), [`args=login registry.lab:5000 --username nx-docker-service --password-stdin mark= stdin=${ENV.DOCKER_PASSWORD}`]);
   assert.ok(lines.includes('config=unset'), lines.join('\n')); // no DOCKER_CONFIG of the Client's
-});
-
-test('a DUT image is pulled from the registry it names (else Docker Hub) with the docker CLI — the host user\'s own logins', async () => {
-  assert.deepEqual(imageSource('registry.lab:5000/python:3.14'), { label: 'registry registry.lab:5000', ref: 'registry.lab:5000/python:3.14' });
-  assert.deepEqual(imageSource('python:3.14'), { label: 'Docker Hub', ref: 'python:3.14' });
-
-  const bin = tmp(),
-    calls = fakeTool(bin, 'docker'),
-    ex = new SwExecutor({}, { push: () => {} }),
-    savedPath = process.env.PATH;
-  ex.docker = { listImages: async () => [] }; // not cached
-  process.env.PATH = `${bin}:${savedPath}`;
-  try {
-    assert.equal(await ex._pullIfMissing('registry.lab:5000/emu:1'), 'registry.lab:5000/emu:1');
-  }
-  finally {
-    process.env.PATH = savedPath;
-  }
-  assert.deepEqual(calls(), ['args=pull -q registry.lab:5000/emu:1 mark= stdin=']);
 });
 
 test('dry run: every --env value hidden, whatever its name; no login step of the Client\'s', () => {

@@ -108,9 +108,9 @@ If two instances instead share the exact same config file (told apart only by `n
 
 **Heartbeats** (every `heartbeat.intervalSec` of the Coordinator) report the state, the host's network addresses, the host's uptime and the current activity (idle, running a job until it's fully finished including uploads, locked locally, or held for a self-update) with its duration — shown on the Coordinator's resource card.
 
-**SW Clients** (`type: sw`) have no settings of their own: each job brings its DUT image (`--docker-image`), pulled with `docker pull` as the service user from the registry its reference names (Docker Hub for a short name) — a private registry needs that user's own `docker login` on the host, once. An older file's `sw` section is ignored.
+**SW Clients** (`type: sw`) have no settings of their own: an SW job is its command. The Client never pulls images or starts containers and doesn't need Docker or git; a job's command does whatever it needs, with credentials passed as `--env`. An older file's `sw` section is ignored.
 
-**HW Clients** (`type: hw`): the `hw-devices` section (older files: `hw`, still read) — up to 8 each of `stlinks`, `uarts`, `usbs` (entries: udev index 1–8 → `/dev/thub/dut<N>-stlink|uart|usb`, a path, or `{ index | path, ... }`; ST-Link entries may give `serial`, UARTs `baudRate`; any of them `devpath` plus optional `vendorId`/`productId`/`subsystem` to get a udev symlink rule). The legacy `stlinkSerial` and `uart` fields still work. Power control from older versions (`relays`, `power`) is ignored, and so are the old `artifactory` and `sources` sections: the Client fetches a job's `--download-file` files and `--git-repo` from wherever the job says, without credentials of its own.
+**HW Clients** (`type: hw`): the `hw-devices` section (older files: `hw`, still read) — up to 8 each of `stlinks`, `uarts`, `usbs` (entries: udev index 1–8 → `/dev/thub/dut<N>-stlink|uart|usb`, a path, or `{ index | path, ... }`; ST-Link entries may give `serial`, UARTs `baudRate`; any of them `devpath` plus optional `vendorId`/`productId`/`subsystem` to get a udev symlink rule). The legacy `stlinkSerial` and `uart` fields still work. Power control from older versions (`relays`, `power`) is ignored, and so are the old `artifactory` and `sources` sections: the Client fetches a job's `--download-file` files from wherever the job says, without credentials of its own.
 
 Example SW config:
 
@@ -165,9 +165,9 @@ It only ever installs `thub-client`, at a strictly validated version. Logs: `jou
 
 1. Receive the job from long-poll and `accept` it.
 2. Create a fresh workspace `<workDir>/<jobId>`.
-3. **Prepare the task's inputs**: clone `--git-repo` into `work/` at its ref and depth (else an empty `work/`), and download every `--download-file` into `downloads/`.
-4. **Prepare** the DUT through the executor: HW resolves ST-Link serials and captures UARTs (nothing is flashed — the command does that); SW starts the job's DUT container (`--docker-image`, if any; downloads at `/downloads`), pulled with `docker pull` as the service user if it isn't on the host yet.
-5. **Run** the job's `--command` with `sh -c` in `work/`, `--arg` values as `"$@"`, and the environment: the job's `--env` variables, its `thub run` parameters as `JOB_*` (e.g. `JOB_GIT_REPO_URL`, `JOB_GIT_BRANCH`, `JOB_GIT_DEPTH` — the full list: main README §7.4, *Client environment variables*), `THUB_DUT_*`, `THUB_DOWNLOAD_<n>`/`THUB_DOWNLOADS_DIR`/`THUB_DOWNLOADS`, `THUB_GIT_COMMIT`, `THUB_JOB_ID`, `THUB_SUITE`, `THUB_WORK_DIR`, one `THUB_META_<KEY>` per job metadata field. Its exit code is the verdict.
+3. **Prepare the task's inputs**: create an empty `work/`, and download every `--download-file` into `downloads/`. Nothing is cloned: a command that needs a repository clones it into `work/` itself.
+4. **Prepare** the DUT through the executor: HW resolves ST-Link serials and captures UARTs (nothing is flashed — the command does that); SW has nothing to prepare.
+5. **Run** the job's `--command` with `sh -c` in `work/`, `--arg` values as `"$@"`, and the environment: the job's `--env` variables, its `thub run` parameters as `JOB_*` (e.g. `JOB_LABEL`, `JOB_SUITE` — the full list: main README §7.4, *Client environment variables*), `THUB_DUT_*`, `THUB_DOWNLOAD_<n>`/`THUB_DOWNLOADS_DIR`/`THUB_DOWNLOADS`, `THUB_JOB_ID`, `THUB_SUITE`, `THUB_WORK_DIR`, one `THUB_META_<KEY>` per job metadata field. Its exit code is the verdict.
 6. Read the JUnit XML the tests left in `work/results/` or `work/artifacts/` and sum it into the job's `summary` (total/passed/failed/skipped). The verdict stays the exit code.
 7. Post the result — with the artifacts the command listed in `$THUB_ARTIFACTS_FILE` (a JSON array of `{name, size, link, timestamp}`), as metadata — delete the workspace, report `IDLE`. **No files are uploaded** besides the log: a job's files exist only in its workspace, which is deleted when the job ends. A job that needs to keep files publishes them itself from its `--command`, e.g. to Artifactory.
 
@@ -175,7 +175,7 @@ The job's `--env` variables are set for the git commands of step 3 and for `--co
 
 **Docker from the command.** The command runs on the Client host, as the service user. To run tests inside an image it starts the container itself (`docker run --rm -v "$THUB_WORK_DIR:/work" -w /work <image> …`), after its own `docker login` if the registry needs one — best with `DOCKER_CONFIG="$THUB_WORK_DIR/.docker"`, so the credentials are deleted with the job rather than left in the service user's `~/.docker`, which needs Docker on the host and the service user in the `docker` group. SW hosts are set up that way (see *Ubuntu 26.04 host setup*); an HW host needs it added. Examples: the Agent README, *Docker*.
 
-A cancel command or job timeout sends `SIGTERM` to the test process group, waits 10s, then `SIGKILL`, and always runs executor teardown. If `spec.dryRun` is set, nothing is executed. Instead the job's log lists every command the real job would run on this Client, in full and in order: the job's `--env` names (every value shown as `***`), each git command with its `--git-options`, the downloads, the DUT setup, and `cd <work> && sh -c …` with its environment. It adds `WOULD FAIL:` lines for anything this Client's config would refuse.
+A cancel command or job timeout sends `SIGTERM` to the test process group, waits 10s, then `SIGKILL`, and always runs executor teardown. If `spec.dryRun` is set, nothing is executed. Instead the job's log lists every command the real job would run on this Client, in full and in order: the job's `--env` names (every value shown as `***`), the downloads, the HW DUT setup, and `cd <work> && sh -c …` with its environment. It adds `WOULD FAIL:` lines for anything this Client's config would refuse.
 
 ### HW executor
 
@@ -185,7 +185,7 @@ ST-Link via `st-flash`/`openocd`, UART via the `serialport` npm package. Stable 
 
 ### SW executor
 
-Runs the job's own image (`--docker-image`) as the DUT with its default command, the job's downloads mounted read-only at `/downloads`; without one, the command runs without a container. The image is pulled from the registry its reference names, else Docker Hub, unless already cached. Runs it (e.g. a Renode or QEMU emulator) in Docker via `dockerode`, one container per job, read-only root filesystem, 2 CPUs / 2 GB, isolated network, always removed in teardown. The emulator's virtual UART is exposed as a TCP port the test runner connects to via `THUB_DUT_HOST`.
+Nothing to prepare or tear down: an SW job is its `--command`, which starts whatever it needs (an emulator in `docker run`, say) and stops it itself. The Client has no Docker dependency.
 
 ## Development
 
