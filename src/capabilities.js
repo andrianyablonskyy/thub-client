@@ -53,7 +53,7 @@ function describeDocker(run){
 }
 
 function describeTyped(config){
-  // An SW Client has no settings: it runs whatever DUT image a job brings.
+  // An SW Client has no settings: a job's command brings whatever it runs.
   if (config.type === 'sw'){
     return { sw: {} };
   }
