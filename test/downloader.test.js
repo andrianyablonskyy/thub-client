@@ -63,11 +63,11 @@ test('the command runs in the work dir via sh -c, with --arg values as "$@" and 
     task = { workDir: path.join(jobDir, 'work'), downloadsDir, downloads: [path.join(downloadsDir, 'app.bin')] },
     lines = [],
     runner = new JobRunner(null, {}),
-    command = 'echo "cwd=$(basename "$PWD") args=$* job=$THUB_JOB_ID fw=$(basename "$THUB_DOWNLOAD_1") dut=$THUB_DUT_STLINK"; exit 3',
+    command = 'echo "cwd=$(basename "$PWD") args=$* job=$THUB_JOB_ID fw=$(basename "$THUB_DOWNLOAD_1") suite=${THUB_SUITE:-unset}"; exit 3',
     job = { id: 'M-00007', spec: { command, args: ['a', 'b c'] } },
-    executor = { envFor: () => ({ THUB_DUT_STLINK: '066D' }) };
+    executor = { envFor: () => ({}) };
   fs.mkdirSync(task.workDir);
   const code = await runner._runCommand(job, task, executor, { push: (s, l) => lines.push(l) });
   assert.equal(code, 3);
-  assert.ok(lines.includes('cwd=work args=a b c job=M-00007 fw=app.bin dut=066D'), lines.join('\n'));
+  assert.ok(lines.includes('cwd=work args=a b c job=M-00007 fw=app.bin suite=unset'), lines.join('\n'));
 });

@@ -65,11 +65,13 @@ async function downloadFiles(downloads, destDir, { signal, log = () => {} } = {}
   return paths;
 }
 
-// Where a task's inputs go under its job directory: `<jobDir>/work`, an
-// empty directory, is where the command runs (and clones into, if it does);
-// the downloads go to `<jobDir>/downloads`, apart from it.
+// Where a task's inputs go: the job directory, `<client workDir>/<jobId>`,
+// is the work directory ($THUB_WORK_DIR) the command runs in, deleted when
+// the job ends; the downloads go to its `downloads/`. The command clones
+// into a folder of its own there (`src/`, say), the Docker config is kept in
+// `.docker/` (runner.js), the artifacts list in `artifacts.json`.
 function taskDirs(jobDir){
-  return { workDir: path.join(jobDir, 'work'), downloadsDir: path.join(jobDir, 'downloads') };
+  return { workDir: jobDir, downloadsDir: path.join(jobDir, 'downloads') };
 }
 
 // A task's inputs, before its command runs. Returns { workDir, downloadsDir,
