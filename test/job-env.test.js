@@ -23,7 +23,7 @@ const test = require('node:test'),
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'thub-env-')),
   // Names of the job's own choosing — none of them means anything to the Client.
-  ENV = { DOCKER_REGISTRY: 'registry.lab:5000', DOCKER_USER: 'nx-docker-service', DOCKER_PASSWORD: 'p a$s,w\'d' };
+  ENV = { DOCKER_REGISTRY: 'registry.lab:5000', DOCKER_USER: 'ci-reader', DOCKER_PASSWORD: 'p a$s,w\'d' };
 
 // A stand-in for `name` on PATH: logs its arguments, $JOB_MARK (and stdin,
 // with `readStdin`) to <dir>/<name>.log, prints `out`.
@@ -54,11 +54,11 @@ test('a git clone is the command\'s own: it gets the token from --env', async ()
   assert.deepEqual(calls(), ['args=clone --depth 1 https://x-access-token:ghp_secret@github.com/org/tests.git . mark= stdin=']);
 });
 
-test('the command gets the job env as given — its own docker login works with any names; the Client adds nothing', async () => {
+test('the command gets the job env as given — its own docker login works with any names, into the job\'s DOCKER_CONFIG', async () => {
   const bin = tmp(),
     calls = fakeTool(bin, 'docker', { readStdin: true }),
     jobDir = tmp(),
-    task = { workDir: path.join(jobDir, 'work'), downloadsDir: path.join(jobDir, 'downloads'), downloads: [] },
+    task = { workDir: jobDir, downloadsDir: path.join(jobDir, 'downloads'), downloads: [] },
     lines = [],
     job = {
       id: 'M-1',
@@ -67,17 +67,16 @@ test('the command gets the job env as given — its own docker login works with 
           ' && echo "config=${DOCKER_CONFIG:-unset}"',
         env: { ...ENV, PATH: `${bin}:${process.env.PATH}` }
       }
-    };
-  fs.mkdirSync(task.workDir);
-  const code = await new JobRunner(null, {})._runCommand(job, task, { envFor: () => ({}) }, { push: (s, l) => lines.push(l) });
+    },
+    code = await new JobRunner(null, {})._runCommand(job, task, { envFor: () => ({}) }, { push: (s, l) => lines.push(l) });
   assert.equal(code, 0, lines.join('\n'));
-  assert.deepEqual(calls(), [`args=login registry.lab:5000 --username nx-docker-service --password-stdin mark= stdin=${ENV.DOCKER_PASSWORD}`]);
-  assert.ok(lines.includes('config=unset'), lines.join('\n')); // no DOCKER_CONFIG of the Client's
+  assert.deepEqual(calls(), [`args=login registry.lab:5000 --username ci-reader --password-stdin mark= stdin=${ENV.DOCKER_PASSWORD}`]);
+  assert.ok(lines.includes(`config=${path.join(jobDir, '.docker')}`), lines.join('\n')); // deleted with the job
 });
 
-test('dry run: every --env value hidden, whatever its name; no login step of the Client\'s', () => {
+test('dry run: every --env value hidden, whatever its name; no login step of the Client\'s; DOCKER_CONFIG in the job dir', () => {
   const plan = dryRunPlan({ id: 'M-2', spec: { target: { type: 'hw', labels: [] }, command: './run.sh', env: { ...ENV, MODE: 'fast' } } }, '/w/M-2', {});
   assert.ok(plan.includes('  DOCKER_REGISTRY=***') && plan.includes('  MODE=***') && plan.includes('  DOCKER_PASSWORD=***'), plan.join('\n'));
-  assert.ok(!plan.some((l) => l.includes(ENV.DOCKER_PASSWORD) || l.includes('nx-docker-service') || l.includes('docker login')));
-  assert.ok(!plan.some((l) => l.includes('DOCKER_CONFIG')));
+  assert.ok(!plan.some((l) => l.includes(ENV.DOCKER_PASSWORD) || l.includes('ci-reader') || l.includes('docker login')));
+  assert.ok(plan.includes('  export DOCKER_CONFIG=/w/M-2/.docker'), plan.join('\n'));
 });

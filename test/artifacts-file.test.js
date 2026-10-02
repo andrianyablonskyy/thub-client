@@ -20,9 +20,14 @@ const test = require('node:test'),
   path = require('node:path'),
   { readArtifactsList, jobEnv } = require('../src/runner');
 
-test('THUB_ARTIFACTS_FILE sits next to the work directory, not in the checkout', () => {
-  const env = jobEnv({ id: 'M-00001', spec: { target: { type: 'sw' } } }, { workDir: '/var/lib/thub/work/dut0/M-00001/work', downloads: [] }, {}, 'lab');
+test('THUB_WORK_DIR is the job directory; the artifacts list and the Docker config live there, beside the clone', () => {
+  const env = jobEnv({ id: 'M-00001', spec: { target: { type: 'sw' } } }, { workDir: '/var/lib/thub/work/dut0/M-00001', downloads: [] }, {}, 'lab');
+  assert.equal(env.THUB_WORK_DIR, '/var/lib/thub/work/dut0/M-00001');
   assert.equal(env.THUB_ARTIFACTS_FILE, '/var/lib/thub/work/dut0/M-00001/artifacts.json');
+  assert.equal(env.DOCKER_CONFIG, '/var/lib/thub/work/dut0/M-00001/.docker');
+  // A job's own --env DOCKER_CONFIG wins.
+  const own = jobEnv({ id: 'M-2', spec: { target: { type: 'sw' }, env: { DOCKER_CONFIG: '/x' } } }, { workDir: '/w/M-2', downloads: [] }, {}, 'lab');
+  assert.equal(own.DOCKER_CONFIG, '/x');
 });
 
 test('the list is read as written; missing, broken or oversized files report nothing, said in the log', () => {
@@ -50,4 +55,20 @@ test('the list is read as written; missing, broken or oversized files report not
   fs.writeFileSync(file, `[${'"x",'.repeat(300_000)}"x"]`);
   assert.equal(readArtifactsList(file, log), undefined);
   assert.match(lines.pop(), /larger than 1024 KB/);
+});
+
+test('JUnit XML is read from results/ or artifacts/ in the work dir or a folder there (src/ after a clone) — not downloads or .docker', () => {
+  const { junitFiles, summarizeJUnit } = require('../src/runner'),
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'thub-junit-')),
+    write = (rel, tests, failures) => {
+      fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true });
+      fs.writeFileSync(path.join(dir, rel), `<testsuite tests="${tests}" failures="${failures}" errors="0" skipped="0"></testsuite>`);
+    };
+  write('src/results/junit.xml', 5, 1);
+  write('results/top.xml', 2, 0);
+  write('downloads/results/x.xml', 99, 99);
+  write('.docker/results/x.xml', 99, 99);
+  assert.deepEqual(junitFiles(dir).map((f) => path.relative(dir, f)).sort(), ['results/top.xml', 'src/results/junit.xml']);
+  assert.equal(summarizeJUnit(junitFiles(dir)).total, 7);
+  assert.equal(summarizeJUnit(junitFiles(dir)).failed, 1);
 });

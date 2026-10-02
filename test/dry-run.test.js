@@ -19,9 +19,9 @@ const test = require('node:test'),
   { shellQuote } = require('../src/downloader');
 
 const JOB_DIR = '/var/lib/thub/j-1',
-  WORK = `${JOB_DIR}/work`,
+  WORK = JOB_DIR, // $THUB_WORK_DIR is the job directory
   job = (spec) => ({ id: 'j-1', spec: { target: { type: 'sw', labels: [] }, command: './run-tests.sh', ...spec } }),
-  config = { hw: { stlinks: [{ path: '/dev/thub/dut1-stlink' }] } };
+  config = { hw: { stlinks: [{ path: '/dev/thub/dut1-stlink' }], uarts: [{ path: '/dev/thub/dut1-uart' }] } };
 
 test('shellQuote: bare when safe, single-quoted otherwise', () => {
   assert.equal(shellQuote('/a/b-c.sh'), '/a/b-c.sh');
@@ -32,9 +32,10 @@ test('shellQuote: bare when safe, single-quoted otherwise', () => {
 test('dry run: downloads, the command with its cwd and env; an SW job has nothing before or after it', () => {
   const plan = dryRunPlan(job({ args: ['a b'], suite: 'smoke', downloads: [{ url: 'https://art.lab/fw/app.bin' }] }), JOB_DIR, config);
   assert.ok(plan.includes(`  GET https://art.lab/fw/app.bin -> ${JOB_DIR}/downloads/app.bin`));
-  assert.ok(!plan.some((l) => /docker|git /.test(l)), plan.join('\n')); // the Client never runs either itself
+  assert.ok(!plan.some((l) => /docker (pull|run|login)|git (clone|fetch)/.test(l)), plan.join('\n')); // the Client never runs either itself
   assert.ok(plan.includes(`  cd ${WORK}`));
-  assert.ok(plan.includes('  export THUB_SUITE=smoke'));
+  assert.ok(plan.includes('  export JOB_SUITE=smoke'));
+  assert.ok(!plan.some((l) => /THUB_SUITE|THUB_DUT_/.test(l)), plan.join('\n')); // neither reaches the job
   assert.ok(plan.includes(`  export THUB_DOWNLOAD_1=${JOB_DIR}/downloads/app.bin`));
   assert.ok(plan.includes('  sh -c ./run-tests.sh thub-job \'a b\''));
   assert.ok(!plan.some((l) => l.startsWith('WOULD FAIL')));
@@ -42,7 +43,8 @@ test('dry run: downloads, the command with its cwd and env; an SW job has nothin
 
 test('dry run: HW steps; downloads from anywhere', () => {
   const plan = dryRunPlan(job({ target: { type: 'hw', labels: [] }, downloads: [{ url: 'https://elsewhere.example/x.bin' }] }), JOB_DIR, config);
-  assert.ok(plan.some((l) => l.startsWith('  udevadm info --query=property --name=/dev/thub/dut1-stlink')));
+  assert.ok(plan.includes('  capture UART /dev/thub/dut1-uart at 115200 baud (uart log stream)'), plan.join('\n'));
+  assert.ok(!plan.some((l) => /udevadm|THUB_DUT_/.test(l))); // no serial lookups, no device variables
   assert.ok(plan.includes(`  GET https://elsewhere.example/x.bin -> ${JOB_DIR}/downloads/x.bin`));
   assert.ok(!plan.some((l) => l.startsWith('WOULD FAIL')));
 });

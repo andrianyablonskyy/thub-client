@@ -226,9 +226,9 @@ class JobRunner{
   }
 
   // The task's entry point: `sh -c <command>` in the work directory, --arg
-  // values as "$@", with the job's environment — the DUT (THUB_DUT_*), its
-  // downloads (THUB_DOWNLOADS_DIR, THUB_DOWNLOAD_<n>, THUB_DOWNLOADS), the
-  // suite and --meta values.
+  // values as "$@", with the job's environment — its --env, its parameters
+  // (JOB_*), its downloads (THUB_DOWNLOADS_DIR, THUB_DOWNLOAD_<n>,
+  // THUB_DOWNLOADS) and --meta values.
   _runCommand(job, task, executor, logShipper){
     return new Promise((resolve, reject) => {
       logShipper.push('runner', `running: ${describeCommand(job.spec)}`);
@@ -253,19 +253,20 @@ function commandArgs(spec){
   return ['-c', spec.command, 'thub-job', ...(spec.args || [])];
 }
 
-// What the job's command gets on top of the Client's own environment: its
-// --env as given (no name means anything to the Client), its parameters as
-// JOB_* (job-params-env.js), then the Client's own THUB_* (the job spec
-// refuses both prefixes in --env).
+// What the job's command gets on top of the Client's own environment: a
+// DOCKER_CONFIG in the job directory (its --env may set its own), its --env
+// as given (no name means anything to the Client), its parameters as JOB_*
+// (job-params-env.js), then the Client's own THUB_* (the job spec refuses
+// both prefixes in --env).
 function jobEnv(job, task, executorEnv, clientName){
   return {
+    DOCKER_CONFIG: dockerConfigDir(task),
     ...job.spec.env,
     ...jobParamsEnv(job.spec, { clientName }),
     ...executorEnv,
     ...metaToEnv(job.spec.meta),
     ...downloadsEnv(task),
     THUB_JOB_ID: job.id,
-    THUB_SUITE: job.spec.suite || 'default',
     THUB_WORK_DIR: task.workDir,
     THUB_ARTIFACTS_FILE: artifactsFile(task)
   };
@@ -331,10 +332,18 @@ function metaToEnv(meta){
 }
 
 // Where the command may list the artifacts it published elsewhere (README
-// §7.3): a JSON array of {name, size, link, timestamp}, next to the work
-// directory rather than in it, so it's never mixed with what the command clones there.
+// §7.3): a JSON array of {name, size, link, timestamp}, in the work
+// directory, beside (not in) whatever the command clones there.
 function artifactsFile(task){
-  return path.join(path.dirname(task.workDir), 'artifacts.json');
+  return path.join(task.workDir, 'artifacts.json');
+}
+
+// The job's own Docker config ($DOCKER_CONFIG, unless --env sets one): a
+// `docker login` in the command lands in the job directory, deleted with
+// it — never in the service user's ~/.docker for every later job. Kept
+// outside what examples mount into containers (`src/`).
+function dockerConfigDir(task){
+  return path.join(task.workDir, '.docker');
 }
 
 const ARTIFACTS_FILE_MAX_BYTES = 1024 * 1024;
@@ -371,11 +380,23 @@ function readArtifactsList(file, log){
 }
 
 // JUnit XML the tests left in results/ or artifacts/ of the work directory.
+// JUnit XML under `results/` or `artifacts/`, in the work directory or in a
+// folder the command made there (`src/results/`, after a clone into src).
+const NOT_SCANNED = new Set(['downloads', '.docker']);
 function junitFiles(workDir){
-  return ['results', 'artifacts'].flatMap((name) => {
-    const dir = path.join(workDir, name);
+  const bases = [workDir];
+  try {
+    bases.push(...fs.readdirSync(workDir, { withFileTypes: true })
+      .filter((e) => e.isDirectory() && !NOT_SCANNED.has(e.name) && !['results', 'artifacts'].includes(e.name))
+      .map((e) => path.join(workDir, e.name)));
+  }
+  catch {
+    // no work directory: nothing to read
+  }
+  return bases.flatMap((base) => ['results', 'artifacts'].flatMap((name) => {
+    const dir = path.join(base, name);
     return fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => f.endsWith('.xml')).map((f) => path.join(dir, f)) : [];
-  });
+  }));
 }
 
 function summarizeJUnit(xmlFiles){
@@ -398,4 +419,4 @@ function sleep(ms){
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-module.exports = { JobRunner, dryRunPlan, readArtifactsList, jobEnv };
+module.exports = { JobRunner, dryRunPlan, readArtifactsList, jobEnv, junitFiles, summarizeJUnit };
