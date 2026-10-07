@@ -71,3 +71,27 @@ test('the command runs in the work dir via sh -c, with --arg values as "$@" and 
   assert.equal(code, 3);
   assert.ok(lines.includes('cwd=work args=a b c job=M-00007 fw=app.bin suite=unset'), lines.join('\n'));
 });
+
+test('a download that can\'t connect says why, not just "fetch failed"', async () => {
+  // A port nothing listens on: the connection is refused.
+  const closed = http.createServer();
+  await new Promise((r) => closed.listen(0, '127.0.0.1', r));
+  const url = `http://127.0.0.1:${closed.address().port}/app.bin`;
+  await new Promise((r) => closed.close(r));
+  const refused = new RegExp(`^Error: Download failed for ${url.replace(/\./g, '\\.')}: .*\\(ECONNREFUSED\\)$`);
+  await assert.rejects(prepareTask({ downloads: [{ url }] }, tmp()), refused);
+
+  // A server certificate from a CA the Client doesn't trust: the hint names NODE_EXTRA_CA_CERTS.
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    const cause = Object.assign(new Error('self-signed certificate in certificate chain'), { code: 'SELF_SIGNED_CERT_IN_CHAIN' });
+    throw new TypeError('fetch failed', { cause });
+  };
+  try {
+    await assert.rejects(prepareTask({ downloads: [{ url: 'https://art.lab/app.bin' }] }, tmp()),
+      /^Error: Download failed for https:\/\/art\.lab\/app\.bin: self-signed certificate in certificate chain \(SELF_SIGNED_CERT_IN_CHAIN\) — .*NODE_EXTRA_CA/);
+  }
+  finally {
+    globalThis.fetch = realFetch;
+  }
+});

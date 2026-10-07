@@ -160,6 +160,16 @@ thub-client power off --port 1
 
 From the Agent, a job can switch them at its start and end (`thub run --power-on-start reset --power-on-end off`), and its owner can switch them while it runs (`thub power reset <jobId>`). Each action is recorded in the job's log. Setup, examples and troubleshooting are in the main README, §8.7.
 
+**Private CA.** If `--download-file` URLs (or the Coordinator) use a certificate from a lab or company CA, give the Client the CA. Node.js doesn't read the system store:
+
+```bash
+sudo systemctl edit thub-client@.service      # [Service]
+                                              # Environment=NODE_EXTRA_CA_CERTS=/usr/local/share/ca-certificates/lab-ca.crt
+sudo systemctl restart 'thub-client@*'
+```
+
+`update-ca-certificates` still covers `curl` and `git` in jobs, and Docker reads `/etc/docker/certs.d/<registry>/ca.crt`. A download that needs a *client* certificate can't use `--download-file`: the job fetches it with `curl --cert` (main README, §7.5).
+
 **Smart sockets, PDUs and other devices.** The Client has no driver for these: jobs switch them from their own `--command` or a repository script (main README, §8.8). On the Client host, install the tools those scripts call (`curl`, `sudo apt install snmp`, `pipx install python-kasa`) and check the device answers from the host. Then tell each instance which device is its bench's. Jobs inherit the service's environment:
 
 ```bash

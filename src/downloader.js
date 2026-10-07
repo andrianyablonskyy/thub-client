@@ -16,11 +16,30 @@
 const fs = require('node:fs'),
   path = require('node:path');
 
+// The server's certificate chain doesn't end at a CA this process trusts —
+// usually a lab or company CA: Node.js doesn't read the system's CA store.
+const UNTRUSTED_CA = new Set([
+    'SELF_SIGNED_CERT_IN_CHAIN', 'DEPTH_ZERO_SELF_SIGNED_CERT', 'UNABLE_TO_GET_ISSUER_CERT_LOCALLY', 'UNABLE_TO_VERIFY_LEAF_SIGNATURE'
+  ]),
+  UNTRUSTED_CA_HINT = ' — the server\'s certificate isn\'t from a CA this Client trusts: give the Client the CA with NODE_EXTRA_CA_CERTS (README §7.5)';
+
 // A plain GET: nothing is ever sent along with a download. A source that
 // needs credentials is fetched by the job's command, with a token from --env.
 // `signal` lets a job cancel abort a download in progress (runner.js).
 async function fetchToFile(url, destPath, { signal } = {}){
-  const res = await fetch(url, { signal });
+  let res;
+  try {
+    res = await fetch(url, { signal });
+  }
+  catch (err){
+    if (signal?.aborted){
+      throw err;
+    }
+    // fetch() itself only says "fetch failed": the reason is its cause.
+    const cause = err.cause,
+      why = cause ? `${cause.message || cause}${cause.code ? ` (${cause.code})` : ''}` : err.message;
+    throw new Error(`Download failed for ${url}: ${why}${UNTRUSTED_CA.has(cause?.code) ? UNTRUSTED_CA_HINT : ''}`);
+  }
   if (!res.ok){
     throw new Error(`Download failed (${res.status}) for ${url}`);
   }
