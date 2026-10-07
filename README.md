@@ -160,6 +160,16 @@ thub-client power off --port 1
 
 From the Agent, a job can switch them at its start and end (`thub run --power-on-start reset --power-on-end off`), and its owner can switch them while it runs (`thub power reset <jobId>`). Each action is recorded in the job's log. Setup, examples and troubleshooting are in the main README, §8.7.
 
+**Smart sockets, PDUs and other devices.** The Client has no driver for these: jobs switch them from their own `--command` or a repository script (main README, §8.8). On the Client host, install the tools those scripts call (`curl`, `sudo apt install snmp`, `pipx install python-kasa`) and check the device answers from the host. Then tell each instance which device is its bench's. Jobs inherit the service's environment:
+
+```bash
+sudo systemctl edit thub-client@dut1      # [Service]
+                                          # Environment=BENCH_POWER=apc:pdu1.lab:5
+sudo systemctl restart thub-client@dut1
+```
+
+Every job on that instance can read these variables, so put addresses there and pass credentials with each job's `--env`.
+
 Run these as the user the Client runs as, not under `sudo` (which would look for `client.json` in root's home). `stop`/`restart` go through the pidfile rather than the control socket, so they work even if the socket is wedged. Stopping is bounded: an idle long-poll is aborted immediately; a running job is killed locally (`SIGTERM`, then `SIGKILL` after a 10s grace period) and reported `ERROR`.
 
 With several instances on one host, target the right one with `--config` before the subcommand:
