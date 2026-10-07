@@ -23,7 +23,10 @@ On a fresh install the service isn't started yet — the daemon would exit at on
 ## Ubuntu 26.04 host setup
 
 ```bash
-sudo apt install -y nodejs npm stlink-tools openocd
+curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | sudo tee /etc/apt/keyrings/nodesource.asc >/dev/null
+echo "deb [signed-by=/etc/apt/keyrings/nodesource.asc] https://deb.nodesource.com/node_24.x nodistro main" | sudo tee /etc/apt/sources.list.d/nodesource.list
+sudo apt update && sudo apt install -y nodejs   # Node.js 24 (Ubuntu's own is 22); includes npm
+sudo apt install -y stlink-tools openocd
 # Docker — SW Clients, and HW Clients whose jobs run docker in --command.
 # Install it before thub-client so the service gets the docker group
 # (re-run the npm i -g below if you add it later). The resource card's
