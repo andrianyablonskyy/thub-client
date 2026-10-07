@@ -2,6 +2,8 @@
   "name": "@andrian.yablonskyy/thub-client",
   "version": "1.1.8",
   "description": "thub-client — runs on lab machines, executes test jobs against a DUT (HW) or emulator (SW)",
+  "license": "SEE LICENSE IN LICENSE.md",
+  "author": "Andrian Yablonskyy <andrian.yablonskyy@gmail.com>",
   "main": "src/daemon.js",
   "bin": {
     "thub-client": "./src/cli.js",

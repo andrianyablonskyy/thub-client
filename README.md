@@ -241,4 +241,4 @@ npm run lint
 
 ## License
 
-Proprietary — see the header comment in each source file.
+See [LICENSE.md](./LICENSE.md).
