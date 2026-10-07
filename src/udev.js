@@ -33,7 +33,15 @@ const RULES_DIR = '/etc/udev/rules.d',
     uart: { subsystem: 'tty', vendorId: '0403', productId: '6001' }, // FTDI FT232R
     usb: { subsystem: 'usb', vendorId: '0483', productId: '5740' } // STM32 CDC (DUT's own USB)
   },
-  LISTS = [['stlinks', 'stlink'], ['uarts', 'uart'], ['usbs', 'usb']];
+  LISTS = [['stlinks', 'stlink'], ['uarts', 'uart'], ['usbs', 'usb']],
+
+  // uhubctl (hw-devices.usbPower, README §8.7) switches a port through its
+  // hub's sysfs `<port>/disable` file (Linux 6+) or over libusb (older):
+  // the service runs as an ordinary user in plugdev, so give that group
+  // both — for every USB hub, since uhubctl also switches a USB3 hub's
+  // USB2 twin, whose location isn't in the config.
+  HUB_POWER_RULE = 'SUBSYSTEM=="usb", DRIVER=="usb", ATTR{bDeviceClass}=="09", MODE="0664", GROUP="plugdev", ' +
+    'RUN+="/bin/sh -c \'chgrp -f plugdev $sys$devpath/*-port*/disable; chmod -f g+w $sys$devpath/*-port*/disable; true\'"';
 
 function rulesFile(instance){
   return path.join(RULES_DIR, `99-thub-${instance}.rules`);
@@ -87,11 +95,14 @@ function ruleLines(hw){
       );
     });
   }
+  if (hw.usbPower?.ports?.length){
+    lines.push(HUB_POWER_RULE);
+  }
   return lines;
 }
 
 // null when this instance needs no rules at all (SW Client, or no entry
-// with a devpath) — its rule file, if any, is then removed.
+// with a devpath and no USB power ports) — its rule file, if any, is then removed.
 function renderRules({ instance, type, hw }){
   const lines = type === 'hw' ? ruleLines(hw || {}) : [];
   if (!lines.length){
@@ -193,7 +204,7 @@ function syncUdevRules(cfg, { log = console } = {}){
   return { status: 'updated', file };
 }
 
-module.exports = { renderRules, syncUdevRules, rulesFile, KIND_DEFAULTS, LEGACY_RULES_FILE };
+module.exports = { renderRules, syncUdevRules, rulesFile, KIND_DEFAULTS, LEGACY_RULES_FILE, HUB_POWER_RULE };
 
 // systemd ExecStartPre=+ entry point (runs as root, before the daemon
 // drops to its own user): `node udev.js --config <path>`.

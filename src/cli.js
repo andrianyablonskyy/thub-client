@@ -2,7 +2,7 @@
 
 /**
  * @file        packages/client/src/cli.js
- * @description thub-client control CLI: lock/unlock/status/stop/restart against the local daemon, and
+ * @description thub-client control CLI: lock/unlock/status/stop/restart/power against the local daemon, and
  *              register/deregister of Client instances on this host (README §8.4)
  *
  * @author      Andrian Yablonskyy
@@ -24,7 +24,9 @@ const fs = require('node:fs'),
   { renderRules, syncUdevRules } = require('./udev'),
   { sendCommand } = require('./control-socket'),
   { register, deregister } = require('./instances'),
-  { PACKAGES, fetchLatestVersion, isNewer, isValidVersion, npmBin } = require('@andrian.yablonskyy/thub-common'),
+  {
+    PACKAGES, fetchLatestVersion, isNewer, isValidVersion, npmBin, POWER_ACTIONS, DEFAULT_RESET_DELAY_SEC, powerRequestErrors
+  } = require('@andrian.yablonskyy/thub-common'),
   { version } = require('../package.json');
 
 const DAEMON_ENTRY = path.join(__dirname, 'daemon.js'),
@@ -173,6 +175,35 @@ program
       process.exit(1);
     }
     console.log(`Restarted (pid ${pid}).`);
+  });
+
+// §8.7: USB port power through the daemon (it runs uhubctl), so it's
+// serialized with a job's own power actions and shows in its log.
+program
+  .command('power')
+  .description('Switch this Client\'s USB power ports (hw-devices.usbPower) with uhubctl, or show their state')
+  .argument('<action>', 'on | off | reset | status')
+  .option('--port <n>', 'Only this port: its 1-based position in hw-devices.usbPower.ports (default: all of them)', (v) => Number(v))
+  .option('--delay <sec>', `reset: seconds between off and on (default ${DEFAULT_RESET_DELAY_SEC})`, (v) => Number(v))
+  .action(async (action, opts) => {
+    const errors = action === 'status'
+      ? powerRequestErrors({ action: 'on', port: opts.port })
+      : powerRequestErrors({ action, delaySec: opts.delay, port: opts.port });
+    if (errors.length){
+      console.error(`Error: ${action === 'status' || POWER_ACTIONS.includes(action) ? errors.join('; ') : 'the action must be on, off, reset or status'}`);
+      process.exit(1);
+    }
+    const res = await sendCommand(socketPath(), { cmd: 'power', action, delaySec: opts.delay, port: opts.port });
+    if (!res.ok){
+      console.error(`Error: ${res.error}`);
+      process.exit(1);
+    }
+    if (action !== 'status'){
+      console.log(`USB power ${action}: done.`);
+    }
+    for (const p of res.ports || []){
+      console.log(`  ${p.number}. hub ${p.hub} port ${p.port}: ${p.power === null ? 'unknown' : p.power ? 'on' : 'off'}${p.status ? `  (${p.status})` : ''}`);
+    }
   });
 
 // Instance management (README "Several DUT slots on one host"): the

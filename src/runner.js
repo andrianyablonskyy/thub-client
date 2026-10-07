@@ -21,15 +21,23 @@ const fs = require('node:fs'),
   { LogShipper } = require('./log-shipper'),
   { jobParamsEnv, envKey } = require('./job-params-env'),
   { HwExecutor } = require('./executors/hw'),
-  { SwExecutor } = require('./executors/sw');
+  { SwExecutor } = require('./executors/sw'),
+  { UsbPower } = require('./usb-power');
 
 const KILL_GRACE_MS = 10_000;
 
 // §8.1 Job execution lifecycle on the Client.
 class JobRunner{
-  constructor(client, config){
+  // `usbPower`: the daemon's UsbPower (one per Client, so requests never
+  // overlap); a new one from the config when not given.
+  constructor(client, config, { usbPower } = {}){
     this.client = client;
     this.config = config;
+    this.usbPower = usbPower || new UsbPower(config.hw?.usbPower?.ports);
+    this.logShipper = null;
+    // Set once the job is accepted: only then does its end switch power.
+    this.accepted = false;
+    this.endPowerDone = false;
     this.canceled = false;
     this.child = null;
     // Aborts downloads in progress on cancel — without it a cancel only
@@ -79,6 +87,7 @@ class JobRunner{
     const jobDir = path.join(this.config.workDir, job.id);
     fs.mkdirSync(jobDir, { recursive: true });
     const logShipper = new LogShipper(this.client, job.id, this.config);
+    this.logShipper = logShipper;
 
     if (job.spec.dryRun){
       return this._runDryRun(job, jobDir, logShipper);
@@ -91,6 +100,13 @@ class JobRunner{
 
     try {
       await this.client.post(`/jobs/${job.id}/accept`);
+      this.accepted = true;
+      // Before downloading anything: a job asking for USB power this
+      // Client can't switch fails at once.
+      const { onStart, onEnd } = job.spec.power || {};
+      if ((onStart || onEnd) && !this.usbPower.configured){
+        throw new Error('the job sets --power-on-start/--power-on-end, but this Client has no USB power ports (hw-devices.usbPower.ports)');
+      }
 
       // The task's inputs first: its downloaded files (README §8.1). A git
       // checkout or a container is the command's own business.
@@ -99,6 +115,13 @@ class JobRunner{
         log: (line) => logShipper.push('runner', line)
       });
       this.task = task;
+      if (this.canceled){
+        return this._bail(job, executor, logShipper);
+      }
+
+      if (onStart){
+        await this._power(onStart, job.spec.power, 'job start');
+      }
       if (this.canceled){
         return this._bail(job, executor, logShipper);
       }
@@ -116,6 +139,7 @@ class JobRunner{
       if (this.canceled){
         return this._bail(job, executor, logShipper);
       }
+      await this._endPower(job);
 
       // Nothing is uploaded (README §8.1): the job's files stay in its
       // workspace, deleted when it ends. The JUnit counts are read here and
@@ -130,6 +154,7 @@ class JobRunner{
     }
     catch (err){
       logShipper.push('runner', this.canceled ? 'job canceled' : `ERROR: ${err.message}`);
+      await this._endPower(job);
       if (!this.canceled){
         await logShipper.drain().catch(() => {});
         await this.client
@@ -141,6 +166,7 @@ class JobRunner{
     }
     finally {
       await executor.teardown().catch(() => {});
+      await this._endPower(job);
       await logShipper.stop();
       fs.rmSync(jobDir, { recursive: true, force: true });
     }
@@ -148,6 +174,7 @@ class JobRunner{
 
   async _bail(job, executor, logShipper){
     await executor.teardown().catch(() => {});
+    await this._endPower(job);
     await this._reportStoppedIfNeeded(job.id);
     await logShipper.stop();
   }
@@ -165,6 +192,41 @@ class JobRunner{
         summary: { error: 'Client stopped by operator (thub-client stop)' }
       })
       .catch(() => {});
+  }
+
+  // A job's --power-on-start/--power-on-end action. Throws (the job ends
+  // in ERROR) when it fails at the start.
+  async _power(action, { resetDelaySec } = {}, when){
+    this.logShipper.push('runner', `${when}: USB power ${action}`);
+    await this.usbPower.apply(action, { delaySec: action === 'reset' ? resetDelaySec : undefined, log: (l) => this.logShipper.push('runner', l) });
+  }
+
+  // --power-on-end, once, whatever the verdict (canceled and failed jobs
+  // included) — before the result is reported where there is one, so it's
+  // in the job's log. A failure here is logged; it doesn't change the verdict.
+  async _endPower(job){
+    const action = job.spec.power?.onEnd;
+    if (!action || !this.accepted || this.endPowerDone || !this.usbPower.configured){
+      return;
+    }
+    this.endPowerDone = true;
+    await this._power(action, job.spec.power, 'job end')
+      .catch((err) => this.logShipper.push('runner', `job end: USB power ${action} failed: ${err.message}`));
+  }
+
+  // Switches USB power while the job runs — asked by its owner (`thub
+  // power`, through the Coordinator) or on this host (`thub-client power`).
+  // `from`: who asked, for the job's log. Throws with why it failed.
+  async powerNow(action, { delaySec, port, from } = {}){
+    const log = (line) => this.logShipper?.push('runner', line);
+    log(`USB power ${action}${port ? ` (port ${port})` : ''} requested${from ? ` by ${from}` : ''}`);
+    try {
+      await this.usbPower.apply(action, { delaySec, port, log });
+    }
+    catch (err){
+      log(`USB power ${action} failed: ${err.message}`);
+      throw err;
+    }
   }
 
   // Dry run (§7.1): walks the same job lifecycle and API calls as a real
@@ -276,6 +338,20 @@ function jobEnv(job, task, executorEnv, clientName){
 // order, with full commands.
 function dryRunPlan(job, jobDir, config){
   const { spec } = job,
+    usbPower = new UsbPower(config.hw?.usbPower?.ports),
+    powerProblems = [],
+    powerPlan = (action) => {
+      if (!action){
+        return [];
+      }
+      try {
+        return usbPower.plan(action, { delaySec: action === 'reset' ? spec.power.resetDelaySec : undefined });
+      }
+      catch (err){
+        powerProblems.push(`USB power ${action}: ${err.message}`);
+        return [];
+      }
+    },
     executor = spec.target.type === 'hw' ? new HwExecutor(config, null) : new SwExecutor(config, null),
     { task, steps: inputs } = planTask(spec, jobDir),
     dut = executor.plan(job, task.downloads.length ? task.downloadsDir : null),
@@ -288,13 +364,15 @@ function dryRunPlan(job, jobDir, config){
     // --env values are treated as secrets whatever their names: never logged.
     ...section('job environment (--env, values hidden), for every command below', jobEnvNames.map((k) => `${k}=${JOB_ENV_MASK}`)),
     ...section('task inputs', inputs),
+    ...section('USB power at job start', powerPlan(spec.power?.onStart)),
     ...section('DUT (HW executor)', dut.steps),
     ...section('command', [
       `cd ${shellQuote(task.workDir)}`,
       ...Object.entries(env).filter(([k]) => !jobEnvNames.includes(k)).map(([k, v]) => `export ${k}=${shellQuote(v)}`),
       shellJoin(['sh', ...commandArgs(spec)])
     ]),
-    ...section('then, whatever the result', dut.teardown),
+    ...section('then, whatever the result', [...dut.teardown, ...powerPlan(spec.power?.onEnd)]),
+    ...[...new Set(powerProblems)].map((p) => `WOULD FAIL: ${p}`),
     ...(dut.problems || []).map((p) => `WOULD FAIL: ${p}`)
   ];
 }

@@ -48,6 +48,9 @@ function jobParamsEnv(spec, { clientName } = {}){
     ...repeated('JOB_ARG', spec.args || [], ' '),
     ...set('JOB_TIMEOUT', spec.timeoutSec),
     ...set('JOB_PRIORITY', spec.priority),
+    ...set('JOB_POWER_ON_START', spec.power?.onStart),
+    ...set('JOB_POWER_ON_END', spec.power?.onEnd),
+    ...set('JOB_POWER_RESET_DELAY', spec.power?.resetDelaySec),
     ...Object.fromEntries(Object.entries(spec.meta || {})
       .filter(([, v]) => ['string', 'number', 'boolean'].includes(typeof v))
       .map(([k, v]) => [`JOB_META_${envKey(k)}`, String(v)]))

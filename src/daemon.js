@@ -28,6 +28,7 @@ const fs = require('node:fs'),
   { syncUdevRules } = require('./udev'),
   { RebootScheduler } = require('./reboot-schedule'),
   { scanUsb } = require('./usb-scan'),
+  { UsbPower } = require('./usb-power'),
   { readHold } = require('./host-hold'),
   { PACKAGES, isNewer } = require('@andrian.yablonskyy/thub-common'),
   { version } = require('../package.json');
@@ -35,7 +36,11 @@ const fs = require('node:fs'),
 // Installed by scripts/install-systemd-unit.js; runs the actual `npm i -g`
 // as root when this daemon writes its update request (README §10.2).
 const UPDATE_PATH_UNIT = '/etc/systemd/system/thub-client-update.path',
-  HOLD_REASONS = { update: 'self-update in progress', reboot: 'scheduled host reboot pending' };
+  HOLD_REASONS = { update: 'self-update in progress', reboot: 'scheduled host reboot pending' },
+  // While a job runs, commands are long-polled for this long at a time, so
+  // its owner's power reset (or a cancel) lands within a second rather than
+  // with the next heartbeat.
+  COMMANDS_WAIT_SEC = 25;
 
 // Every address on this host's network interfaces except loopback, for
 // the dashboard's resource card. The external address isn't known here —
@@ -67,12 +72,15 @@ class Daemon{
     this.heartbeatTimer = null;
     this.heartbeatInFlight = false;
     this.pollAbort = null;
+    // Aborted by stop(): ends the commands long-poll (_pollCommands).
+    this.shutdown = new AbortController();
     // Host-wide hold by a root helper: null, 'update' or 'reboot'.
     this.holdReason = null;
     // Dashboard config edits (Config tab): the revision applied, and a
     // restart owed once idle so the new capabilities take effect.
     this.configState = readAppliedConfigRevision(config.configRevisionFile);
     this.restartForConfig = false;
+    this.usbPower = usbPowerOf(config);
     this.reboot = new RebootScheduler({
       scheduleFile: config.rebootScheduleFile,
       requestFile: config.rebootRequestFile,
@@ -203,7 +211,21 @@ class Daemon{
         activeJobId: this.activeJobId,
         localLock: this.localLock,
         updateHold: this.updateHold
-      })
+      }),
+      // `thub-client power on|off|reset|status` on this host (README §8.7).
+      // A running job's log says so too.
+      power: async ({ action, delaySec, port }) => {
+        if (action === 'status'){
+          return { ports: await this.usbPower.status({ port }) };
+        }
+        if (this.runner){
+          await this.runner.powerNow(action, { delaySec, port, from: 'thub-client on the Client host' });
+        }
+        else {
+          await this.usbPower.apply(action, { delaySec, port, log: (line) => console.log(line) });
+        }
+        return { ports: await this.usbPower.status({ port }).catch(() => null) };
+      }
     });
   }
 
@@ -348,8 +370,13 @@ class Daemon{
     });
 
     this._adoptHeartbeatInterval(heartbeatIntervalSec);
+    await this._handleCommands(commands || []);
+    await this._restartForConfigIfIdle();
+  }
 
-    for (const command of commands || []){
+  // From a heartbeat's reply, or the commands long-poll while a job runs.
+  async _handleCommands(commands){
+    for (const command of commands){
       if (command.command === 'cancel-job' && command.jobId === this.activeJobId){
         this.runner?.cancel();
       }
@@ -388,8 +415,39 @@ class Daemon{
       else if (command.command === 'scan-usb'){
         this._scanUsb(command.requestId);
       }
+      // `thub power` by the running job's owner (README §8.7). Not awaited:
+      // a reset's delay mustn't hold up the next command (a cancel).
+      else if (command.command === 'power' && command.jobId === this.activeJobId && this.runner){
+        const { action, delaySec, port, by } = command;
+        this.runner.powerNow(action, { delaySec, port, from: by ? `${by} (thub power)` : 'thub power' }).catch(() => {});
+      }
     }
-    await this._restartForConfigIfIdle();
+  }
+
+  // While job `jobId` runs: long-polls the Coordinator for commands, so they
+  // don't wait for the next heartbeat. A Coordinator without this endpoint
+  // (404) leaves them to heartbeats, as before. Not aborted when the job
+  // ends — the request in flight may already carry commands taken off the
+  // queue (a reboot, say) — only on shutdown.
+  async _pollCommands(jobId){
+    const { signal } = this.shutdown;
+    while (!signal.aborted && this.activeJobId === jobId && this.commandsPollSupported !== false){
+      try {
+        const reply = await this.client.get(`/resources/${this.resourceId}/commands`, { query: { wait: COMMANDS_WAIT_SEC }, signal });
+        await this._handleCommands(reply?.commands || []);
+      }
+      catch (err){
+        if (signal.aborted){
+          break;
+        }
+        if (err.status === 404){
+          this.commandsPollSupported = false;
+          break;
+        }
+        console.error('commands poll error:', err.message);
+        await sleep(this._heartbeatMs(), signal);
+      }
+    }
   }
 
   async _scanUsb(requestId){
@@ -474,6 +532,7 @@ class Daemon{
     }
     try {
       this.config = loadConfig(this.config.configPath, { name: this.config.name });
+      this.usbPower = usbPowerOf(this.config);
       this._syncUdevRules();
       await this._ensureRegistered();
       console.log('new config applied (reloaded in place)');
@@ -551,7 +610,8 @@ class Daemon{
     console.log(`Job ${job.id} queued`);
     this.activeJobId = job.id;
     this._touchActivity();
-    this.runner = new JobRunner(this.client, this.config);
+    this.runner = new JobRunner(this.client, this.config, { usbPower: this.usbPower });
+    this._pollCommands(job.id);
     try {
       await this.runner.run(job);
     }
@@ -574,12 +634,25 @@ class Daemon{
   stop(){
     this.stopped = true;
     this.pollAbort?.abort();
+    this.shutdown.abort();
     this.runner?.cancel(true);
   }
 }
 
-function sleep(ms){
-  return new Promise((resolve) => setTimeout(resolve, ms));
+// Resolves after `ms`, or early once `signal` aborts.
+function sleep(ms, signal){
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    signal?.addEventListener('abort', () => {
+      clearTimeout(timer);
+      resolve();
+    }, { once: true });
+  });
+}
+
+// An HW Client's uhubctl ports (hw-devices.usbPower); an SW Client has none.
+function usbPowerOf(config){
+  return new UsbPower(config.type === 'hw' ? config.hw?.usbPower?.ports : []);
 }
 
 // Accepts --config/-c <path> (or --config=<path>) so a specific instance can

@@ -133,7 +133,32 @@ thub-client unlock                           # -> IDLE
 thub-client status
 thub-client stop      # SIGTERM; graceful, bounded shutdown
 thub-client restart   # stop, then start a new daemon with the same config
+thub-client power on|off|reset|status [--port <n>] [--delay <sec>]   # USB port power with uhubctl (hw-devices.usbPower)
 ```
+
+**USB port power.** Install `uhubctl` (`sudo apt install uhubctl`) and find each DUT's hub and port with `sudo uhubctl`. The hub's location is the word after `hub`, and the port is the number after `Port`:
+
+```
+Current status for hub 1-1.4 [2109:2817 VIA Labs, Inc. USB2.0 Hub, USB 2.10, 4 ports, ppps]
+  Port 2: 0103 power enable connect [0483:3748 STMicroelectronics STM32 STLink 066DFF485457725187092834]
+```
+
+List them in the config, up to 8. `--port` takes a port's position in this list, starting at 1:
+
+```json
+"hw-devices": { "usbPower": { "ports": [{ "hub": "1-1.4", "port": 2 }, { "hub": "1-1.4", "port": 3 }] } }
+```
+
+Restart the Client: it installs a udev rule that lets the `plugdev` group switch hub ports. Then:
+
+```bash
+thub-client power status                     # 1. hub 1-1.4 port 2: on  (Port 2: 0103 power enable connect [...])
+thub-client power reset                      # every port: off, 1 s, on
+thub-client power reset --port 2 --delay 3   # hub 1-1.4 port 3 only, 3 s off
+thub-client power off --port 1
+```
+
+From the Agent, a job can switch them at its start and end (`thub run --power-on-start reset --power-on-end off`), and its owner can switch them while it runs (`thub power reset <jobId>`). Each action is recorded in the job's log. Setup, examples and troubleshooting are in the main README, §8.7.
 
 Run these as the user the Client runs as, not under `sudo` (which would look for `client.json` in root's home). `stop`/`restart` go through the pidfile rather than the control socket, so they work even if the socket is wedged. Stopping is bounded: an idle long-poll is aborted immediately; a running job is killed locally (`SIGTERM`, then `SIGKILL` after a 10s grace period) and reported `ERROR`.
 

@@ -1,6 +1,6 @@
 /**
  * @file        packages/client/src/capabilities.js
- * @description What this Client can drive — an HW Client's udev devices (an SW Client has none of its own) —
+ * @description What this Client can drive — an HW Client's udev devices and USB power ports (an SW Client has none) —
  *              reported to the Coordinator at registration (README §5.1, §10)
  *
  * @author      Andrian Yablonskyy
@@ -25,7 +25,7 @@ function device(entry, extra = {}){
 }
 
 function describeCapabilities(config, { run = execFileSync } = {}){
-  return { ...describeTyped(config), docker: describeDocker(run) };
+  return { ...describeTyped(config, run), docker: describeDocker(run) };
 }
 
 // Whether a job's command can use Docker here — the `docker` CLI on the
@@ -52,7 +52,7 @@ function describeDocker(run){
   }
 }
 
-function describeTyped(config){
+function describeTyped(config, run){
   // An SW Client has no settings: a job's command brings whatever it runs.
   if (config.type === 'sw'){
     return { sw: {} };
@@ -62,9 +62,31 @@ function describeTyped(config){
     hw: {
       stlinks: (hw.stlinks || []).map((s) => device(s, s.serial ? { serial: s.serial } : {})),
       uarts: (hw.uarts || []).map((u) => device(u, u.baudRate ? { baudRate: u.baudRate } : {})),
-      usbs: (hw.usbs || []).map((u) => device(u))
+      usbs: (hw.usbs || []).map((u) => device(u)),
+      usbPower: describeUsbPower(hw.usbPower, run)
     }
   };
+}
+
+// The uhubctl ports (README §8.7) and whether uhubctl is there to switch
+// them — the Coordinator refuses a job owner's power request otherwise.
+// null: no ports configured.
+function describeUsbPower(usbPower, run){
+  const ports = (usbPower?.ports || []).map((p) => ({ hub: p.hub, port: p.port }));
+  if (!ports.length){
+    return null;
+  }
+  try {
+    const version = String(run('uhubctl', ['-v'], { timeout: 5000, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })).trim();
+    return { ports, available: true, version: version || null };
+  }
+  catch (err){
+    return {
+      ports,
+      available: false,
+      reason: err.code === 'ENOENT' ? 'uhubctl isn\'t installed (on Ubuntu: sudo apt install uhubctl)' : String(err.stderr || err.message).trim().slice(0, 300)
+    };
+  }
 }
 
 module.exports = { describeCapabilities };
