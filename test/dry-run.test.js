@@ -43,7 +43,7 @@ test('dry run: downloads, the command with its cwd and env; an SW job has nothin
 
 test('dry run: HW steps; downloads from anywhere', () => {
   const plan = dryRunPlan(job({ target: { type: 'hw', labels: [] }, downloads: [{ url: 'https://elsewhere.example/x.bin' }] }), JOB_DIR, config);
-  assert.ok(plan.includes('  capture UART /dev/thub/dut1-uart at 115200 baud (uart log stream)'), plan.join('\n'));
+  assert.ok(plan.includes('  capture UART /dev/thub/dut1-uart at 115200 baud (uart log stream; reopened if it disconnects)'), plan.join('\n'));
   assert.ok(!plan.some((l) => /udevadm|THUB_DUT_/.test(l))); // no serial lookups, no device variables
   assert.ok(plan.includes(`  GET https://elsewhere.example/x.bin -> ${JOB_DIR}/downloads/x.bin`));
   assert.ok(!plan.some((l) => l.startsWith('WOULD FAIL')));

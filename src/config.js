@@ -36,7 +36,11 @@ const USER_CONFIG_PATH = path.join(os.homedir(), '.config', 'thub', 'client.json
   // Upper bound on each HW device list (hw.uarts/usbs/stlinks) and on
   // Client instances per host — matching the dut1..dut8 symlink naming
   // (udev.js, §8.2, §8.6).
-  MAX_SLOTS = 8;
+  MAX_SLOTS = 8,
+
+  // Entries per hw-devices list: two per board fit (a UART adapter and the
+  // board's own USB serial port, both in `uarts`, README §8.6).
+  MAX_DEVICES_PER_LIST = 16;
 
 // Matches README.md §13 (~/.config/thub/client.json). `overrides.name` (the
 // daemon's --name, when started by hand with one) wins over the file's
@@ -199,8 +203,8 @@ function assertListSize(field, list){
   if (!Array.isArray(list)){
     throw new Error(`${field} must be an array`);
   }
-  if (list.length > MAX_SLOTS){
-    throw new Error(`${field} supports at most ${MAX_SLOTS} entries, got ${list.length}`);
+  if (list.length > MAX_DEVICES_PER_LIST){
+    throw new Error(`${field} supports at most ${MAX_DEVICES_PER_LIST} entries, got ${list.length}`);
   }
 }
 
@@ -225,8 +229,8 @@ function resolveDeviceList(field, list, kind){
   });
 }
 
-// §8.2/§8.6: up to MAX_SLOTS each of UART adapters, DUT USB devices and
-// ST-Link probes per Client. The single-device fields (`uart`,
+// §8.2/§8.6: up to MAX_DEVICES_PER_LIST each of UART adapters (or boards'
+// own USB serial ports), DUT USB devices and ST-Link probes per Client. The single-device fields (`uart`,
 // `stlinkSerial`) are still accepted and fold into the matching list when
 // that list isn't set. Power control left in an older file (hw.relays,
 // hw.power) is ignored: Clients no longer have any.
@@ -370,5 +374,6 @@ module.exports = {
   assertSlotIndex,
   assertDeviceIndex,
   devicePath,
-  MAX_SLOTS
+  MAX_SLOTS,
+  MAX_DEVICES_PER_LIST
 };

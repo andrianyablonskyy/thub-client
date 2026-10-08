@@ -6,11 +6,26 @@ What changed in each release, newest first. `## Unreleased` collects the changes
 
 Changes since 1.1.8.
 
+### Added
+
+- **Serial ports survive resets.** A captured UART that disappears is reopened as soon as it's back, with a line in the log each way. That includes a board's own USB serial port while the board resets, e.g. after the job flashes it. A UART that isn't there when the job starts is waited for. Until now, its capture just stopped.
+- **Boards' own USB serial ports can be captured** like UART adapters: list them in `hw-devices.uarts` with `"subsystem": "tty"` and the board's USB id.
+- **Up to 16 devices per list** (`stlinks`, `uarts`, `usbs`; was 8), e.g. five boards with an ST-Link, a UART adapter and a USB serial port each on one Client.
+
+### Changed
+
+- **UART lines are tagged with the port's name** — its `label`, or its device's file name (`[dut2-usb] …`) — instead of its position in the list (`[uart7] …`), when a Client captures more than one.
+
 ### Fixed
 
+- **A configured UART that wasn't there could end the Client.** Opening it raised an error event nothing listened to. Every serial error is now written to the job's log instead.
 - **Disabled tests no longer count as passed.** GoogleTest (`DISABLED_` tests) and CTest report tests that never ran in a separate `disabled` attribute, which the job's test counts ignored, so they showed as passed. They're now counted as skipped.
+
+### Requires
+
+- `@andrian.yablonskyy/thub-common` with 16-entry device lists and the UART `label` (the release after 1.1.5): it validates the Client's config.
 
 ### Docs
 
-- README: Node.js 24 from NodeSource on Ubuntu 26.04 (whose own `nodejs` is 22), test results (where the Client reads JUnit XML, and why a test that drives the board itself mustn't use a UART the Client captures), private CAs for `--download-file`; the license is now `LICENSE.md` (`"license"` and `"author"` set in `package.json`).
+- README: serial ports in the log (tags, reopening, boards' USB serial ports); Node.js 24 from NodeSource on Ubuntu 26.04 (whose own `nodejs` is 22), test results (where the Client reads JUnit XML, and why a test that drives the board itself mustn't use a UART the Client captures), private CAs for `--download-file`; the license is now `LICENSE.md` (`"license"` and `"author"` set in `package.json`).
 - These release notes (`RELEASE.md`) are now part of the package.

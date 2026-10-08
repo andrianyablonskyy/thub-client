@@ -113,7 +113,7 @@ If two instances instead share the exact same config file (told apart only by `n
 
 **SW Clients** (`type: sw`) have no settings of their own: an SW job is its command. The Client never pulls images or starts containers and doesn't need Docker or git; a job's command does whatever it needs, with credentials passed as `--env`. An older file's `sw` section is ignored.
 
-**HW Clients** (`type: hw`): the `hw-devices` section (older files: `hw`, still read) — up to 8 each of `stlinks`, `uarts`, `usbs` (entries: udev index 1–8 → `/dev/thub/dut<N>-stlink|uart|usb`, a path, or `{ index | path, ... }`; ST-Link entries may give `serial`, UARTs `baudRate`; any of them `devpath` plus optional `vendorId`/`productId`/`subsystem` to get a udev symlink rule). The legacy `stlinkSerial` and `uart` fields still work. Power control from older versions (`relays`, `power`) is ignored, and so are the old `artifactory` and `sources` sections: the Client fetches a job's `--download-file` files from wherever the job says, without credentials of its own.
+**HW Clients** (`type: hw`): the `hw-devices` section (older files: `hw`, still read) — up to 16 each of `stlinks`, `uarts`, `usbs` (entries: udev index 1–8 → `/dev/thub/dut<N>-stlink|uart|usb`, a path, or `{ index | path, ... }`; ST-Link entries may give `serial`, UARTs `baudRate` and `label`; any of them `devpath` plus optional `vendorId`/`productId`/`subsystem` to get a udev symlink rule). The legacy `stlinkSerial` and `uart` fields still work. Power control from older versions (`relays`, `power`) is ignored, and so are the old `artifactory` and `sources` sections: the Client fetches a job's `--download-file` files from wherever the job says, without credentials of its own.
 
 Example SW config:
 
@@ -162,6 +162,8 @@ thub-client power off --port 1
 ```
 
 From the Agent, a job can switch them at its start and end (`thub run --power-on-start reset --power-on-end off`), and its owner can switch them while it runs (`thub power reset <jobId>`). Each action is recorded in the job's log. Setup, examples and troubleshooting are in the main README, §8.7.
+
+**Serial ports in the log.** Every entry in `uarts` (USB-UART adapters, and boards' own USB serial ports with `"subsystem": "tty"` and the board's USB id) is captured for the whole job into the `uart` stream. With more than one, each line is tagged with the port's `label` or its device's name (`[dut2-usb] …`). A port that disappears, such as a board's USB serial port while the board resets after flashing, is reopened as soon as it's back. One not there at the start is waited for, and the log says so. A worked example with five boards (ST-Links, FT232RL adapters and the boards' own USB) on one 15-port hub is in the main README, §8.6 (*Five boards on one Client*).
 
 **Test results.** After every job, the Client sums the JUnit XML in `results/` or `artifacts/` (in the work directory, or one folder down) into the job's test counts. GoogleTest's and CTest's disabled tests count as skipped. Jobs that drive the board from the host (pytest with pyserial, say) must use a port the Client doesn't capture: a UART in `hw-devices.uarts` is held open for the whole job, and a second open fails with *Device or resource busy*. Main README, §7.6.
 
