@@ -2,6 +2,10 @@
   "name": "@andrian.yablonskyy/thub-client",
   "version": "1.1.13",
   "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/andrianyablonskyy/thub-client.git"
+  },
   "description": "thub-client — runs on lab machines, executes test jobs against a DUT (HW) or emulator (SW)",
   "license": "SEE LICENSE IN LICENSE.md",
   "author": "Andrian Yablonskyy <andrian.yablonskyy@gmail.com>",
@@ -15,7 +19,7 @@
     "register": "node src/cli.js register",
     "deregister": "node src/cli.js deregister",
     "test": "node --test test/*.test.js",
-    "postinstall": "node scripts/install-default-config.js && node scripts/install-systemd-unit.js",
+    "postinstall": "node scripts/postinstall.js",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix"
   },

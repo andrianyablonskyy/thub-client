@@ -113,7 +113,7 @@ class RebootScheduler{
     if (!fs.existsSync(this.pathUnit)){
       this.log.warn(
         `${what} requested, but ${this.pathUnit} isn't installed — ` +
-          'reinstall the Client as root (sudo npm i -g @andrian.yablonskyy/thub-client) to enable host reboots'
+          'reinstall the Client as root (sudo npm i -g --install-links git+https://github.com/andrianyablonskyy/thub-client.git) to enable host reboots'
       );
       return false;
     }

@@ -8,7 +8,7 @@ Wants=network-online.target
 # user the Client runs as. Runs as root: `npm i -g` writes the global
 # node_modules, and its postinstall re-renders these units and restarts every
 # running thub-client@ instance (once none is busy). The helper only ever installs
-# @andrian.yablonskyy/thub-client, at a strictly validated version.
+# thub-client from its git repository, at a strictly validated release tag.
 [Service]
 Type=oneshot
 Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin

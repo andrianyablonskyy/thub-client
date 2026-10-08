@@ -2,6 +2,19 @@
 
 What changed in each release, newest first. `## Unreleased` collects the changes since the version on npm; `bin/publish` turns that heading into the version and date it releases.
 
+## Unreleased
+
+Changes since 1.1.13.
+
+### Changed
+
+- **Updates come from the Client's git repository.** `thub-client check-update` reads its newest release tag. The root update helper (dashboard **Update**) and `thub-client self-update` install with `npm i -g --install-links git+https://github.com/andrianyablonskyy/thub-client.git#vX.Y.Z`.
+- **The postinstall sets up once per install.** npm also runs it while preparing a git package, and it skips that run, so instances restart once, not twice.
+
+### Upgrading from npm
+
+- A Client installed from npm (1.1.12 or older) can only update from npm, where nothing new comes. Reinstall it once on its host with `sudo npm i -g --install-links git+https://github.com/andrianyablonskyy/thub-client.git`; it restarts its instances. From then on the dashboard updates it as usual.
+
 ## 1.1.13 — 2026-10-08
 
 Changes since 1.1.13.
