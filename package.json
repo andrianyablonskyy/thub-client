@@ -24,7 +24,7 @@
     "lint:fix": "eslint . --fix"
   },
   "dependencies": {
-    "@andrian.yablonskyy/thub-common": "git+https://github.com/andrianyablonskyy/thub-common.git#semver:^1.1.10",
+    "@andrian.yablonskyy/thub-common": "git+https://github.com/andrianyablonskyy/thub-common.git#semver:^1.1.11",
     "commander": "^13.1.0",
     "uuid": "^11.1.0"
   },
