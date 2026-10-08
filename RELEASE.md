@@ -15,6 +15,7 @@ Changes since 1.1.9.
 ### Changed
 
 - **UART lines are tagged with the port's name** — its `label`, or its device's file name (`[dut2-usb] …`) — instead of its position in the list (`[uart7] …`), when a Client captures more than one.
+- A dry run (`thub run --dry-run`) says each captured UART is reopened if it disconnects.
 
 ### Fixed
 
@@ -22,7 +23,7 @@ Changes since 1.1.9.
 
 ### Requires
 
-- `@andrian.yablonskyy/thub-common` with 16-entry device lists and the UART `label` (the release after 1.1.6): it validates the Client's config.
+- `@andrian.yablonskyy/thub-common` 1.1.7 or later (16-entry device lists, the UART `label`): it validates the Client's config.
 
 ### Docs
 
