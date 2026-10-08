@@ -13,3 +13,4 @@ Changes since 1.1.8.
 ### Docs
 
 - README: Node.js 24 from NodeSource on Ubuntu 26.04 (whose own `nodejs` is 22), test results (where the Client reads JUnit XML, and why a test that drives the board itself mustn't use a UART the Client captures), private CAs for `--download-file`; the license is now `LICENSE.md` (`"license"` and `"author"` set in `package.json`).
+- These release notes (`RELEASE.md`) are now part of the package.
