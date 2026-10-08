@@ -163,6 +163,8 @@ thub-client power off --port 1
 
 From the Agent, a job can switch them at its start and end (`thub run --power-on-start reset --power-on-end off`), and its owner can switch them while it runs (`thub power reset <jobId>`). Each action is recorded in the job's log. Setup, examples and troubleshooting are in the main README, §8.7.
 
+**Test results.** After every job, the Client sums the JUnit XML in `results/` or `artifacts/` (in the work directory, or one folder down) into the job's test counts. GoogleTest's and CTest's disabled tests count as skipped. Jobs that drive the board from the host (pytest with pyserial, say) must use a port the Client doesn't capture: a UART in `hw-devices.uarts` is held open for the whole job, and a second open fails with *Device or resource busy*. Main README, §7.6.
+
 **Private CA.** If `--download-file` URLs (or the Coordinator) use a certificate from a lab or company CA, give the Client the CA. Node.js doesn't read the system store:
 
 ```bash

@@ -487,7 +487,8 @@ function summarizeJUnit(xmlFiles){
       const attr = (name) => Number(new RegExp(`${name}="(\\d+)"`).exec(match[0])?.[1] || 0);
       total += attr('tests');
       failed += attr('failures') + attr('errors');
-      skipped += attr('skipped');
+      // GoogleTest and CTest count tests that never ran (DISABLED_) apart.
+      skipped += attr('skipped') + attr('disabled');
     }
   }
   return { total, passed: Math.max(total - failed - skipped, 0), failed, skipped };

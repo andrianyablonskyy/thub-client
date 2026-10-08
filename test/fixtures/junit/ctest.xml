@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="(empty)"
+	tests="4"
+	failures="1"
+	disabled="1"
+	skipped="1"
+	hostname=""
+	time="0"
+	timestamp="2026-10-08T07:28:34"
+	>
+	<testcase name="Uart.Echo115200" classname="Uart.Echo115200" time="0.000954417" status="run">
+		<properties/>
+		<system-out>Running main() from ./googletest/src/gtest_main.cc
+Note: Google Test filter = Uart.Echo115200
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from Uart
+[ RUN      ] Uart.Echo115200
+[       OK ] Uart.Echo115200 (0 ms)
+[----------] 1 test from Uart (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 1 test.
+</system-out>
+	</testcase>
+	<testcase name="Uart.FlowControl" classname="Uart.FlowControl" time="0.000877875" status="fail">
+		<failure message="Failed"/>
+		<properties/>
+		<system-out>Running main() from ./googletest/src/gtest_main.cc
+Note: Google Test filter = Uart.FlowControl
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from Uart
+[ RUN      ] Uart.FlowControl
+src/test/uart_test.cpp:3: Failure
+Expected equality of these values:
+  2
+  3
+no CTS
+
+[  FAILED  ] Uart.FlowControl (0 ms)
+[----------] 1 test from Uart (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 0 tests.
+[  FAILED  ] 1 test, listed below:
+[  FAILED  ] Uart.FlowControl
+
+ 1 FAILED TEST
+</system-out>
+	</testcase>
+	<testcase name="Uart.Parity" classname="Uart.Parity" time="0.0008395" status="notrun">
+		<skipped message="SKIP_REGULAR_EXPRESSION_MATCHED"/>
+		<properties/>
+		<system-out>Running main() from ./googletest/src/gtest_main.cc
+Note: Google Test filter = Uart.Parity
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from Uart
+[ RUN      ] Uart.Parity
+src/test/uart_test.cpp:4: Skipped
+no parity on this board
+
+[  SKIPPED ] Uart.Parity (0 ms)
+[----------] 1 test from Uart (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 0 tests.
+[  SKIPPED ] 1 test, listed below:
+[  SKIPPED ] Uart.Parity
+</system-out>
+	</testcase>
+	<testcase name="Uart.Break" classname="Uart.Break" time="0" status="disabled">
+		<properties/>
+		<system-out>Disabled</system-out>
+	</testcase>
+</testsuite>

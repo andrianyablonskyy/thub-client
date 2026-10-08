@@ -48,3 +48,11 @@ test('dry run: HW steps; downloads from anywhere', () => {
   assert.ok(plan.includes(`  GET https://elsewhere.example/x.bin -> ${JOB_DIR}/downloads/x.bin`));
   assert.ok(!plan.some((l) => l.startsWith('WOULD FAIL')));
 });
+
+test('JUnit counts: GoogleTest\'s and CTest\'s disabled tests are skipped, not passed', () => {
+  const { summarizeJUnit } = require('../src/runner'),
+    dir = require('node:path').join(__dirname, 'fixtures', 'junit');
+  for (const file of ['googletest.xml', 'ctest.xml']){
+    assert.deepEqual(summarizeJUnit([require('node:path').join(dir, file)]), { total: 4, passed: 1, failed: 1, skipped: 2 }, file);
+  }
+});
