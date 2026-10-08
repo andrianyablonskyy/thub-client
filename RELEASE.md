@@ -2,9 +2,9 @@
 
 What changed in each release, newest first. `## Unreleased` collects the changes since the version on npm; `bin/publish` turns that heading into the version and date it releases.
 
-## 1.1.9 — 2026-10-08
+## Unreleased
 
-Changes since 1.1.8.
+Changes since 1.1.9.
 
 ### Added
 
@@ -19,13 +19,30 @@ Changes since 1.1.8.
 ### Fixed
 
 - **A configured UART that wasn't there could end the Client.** Opening it raised an error event nothing listened to. Every serial error is now written to the job's log instead.
-- **Disabled tests no longer count as passed.** GoogleTest (`DISABLED_` tests) and CTest report tests that never ran in a separate `disabled` attribute, which the job's test counts ignored, so they showed as passed. They're now counted as skipped.
 
 ### Requires
 
-- `@andrian.yablonskyy/thub-common` with 16-entry device lists and the UART `label` (the release after 1.1.5): it validates the Client's config.
+- `@andrian.yablonskyy/thub-common` with 16-entry device lists and the UART `label` (the release after 1.1.6): it validates the Client's config.
 
 ### Docs
 
-- README: serial ports in the log (tags, reopening, boards' USB serial ports); Node.js 24 from NodeSource on Ubuntu 26.04 (whose own `nodejs` is 22), test results (where the Client reads JUnit XML, and why a test that drives the board itself mustn't use a UART the Client captures), private CAs for `--download-file`; the license is now `LICENSE.md` (`"license"` and `"author"` set in `package.json`).
+- README: serial ports in the log (tags, reopening, boards' USB serial ports).
+
+## 1.1.9 — 2026-10-08
+
+Changes since 1.1.8.
+
+### Added
+
+
+### Changed
+
+
+### Fixed
+
+- **Disabled tests no longer count as passed.** GoogleTest (`DISABLED_` tests) and CTest report tests that never ran in a separate `disabled` attribute, which the job's test counts ignored, so they showed as passed. They're now counted as skipped.
+
+### Docs
+
+- README: Node.js 24 from NodeSource on Ubuntu 26.04 (whose own `nodejs` is 22), test results (where the Client reads JUnit XML, and why a test that drives the board itself mustn't use a UART the Client captures), private CAs for `--download-file`; the license is now `LICENSE.md` (`"license"` and `"author"` set in `package.json`).
 - These release notes (`RELEASE.md`) are now part of the package.
