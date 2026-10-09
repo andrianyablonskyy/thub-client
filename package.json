@@ -19,7 +19,7 @@
     "lint:fix": "eslint . --fix"
   },
   "dependencies": {
-    "@andrian.yablonskyy/thub-common": "^2.0.0",
+    "@andrian.yablonskyy/thub-common": "^2.0.1",
     "commander": "^13.1.0"
   },
   "devDependencies": {
