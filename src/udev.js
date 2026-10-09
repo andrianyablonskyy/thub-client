@@ -19,13 +19,9 @@ const fs = require('node:fs'),
   { execFileSync } = require('node:child_process');
 
 const RULES_DIR = '/etc/udev/rules.d',
-  // Shipped by thub-client <= 1.0.17's postinstall; now superseded by the
-  // per-instance files below, and its symlinks would clash with theirs.
-  LEGACY_RULES_FILE = path.join(RULES_DIR, '99-thub.rules'),
   SETTLE_TIMEOUT_SEC = 10,
 
-  // Per-kind match defaults — the adapters the old static rules file
-  // targeted. Each hw.* entry can override vendorId/productId/subsystem.
+  // Per-kind match defaults: common adapters. Each hw-devices.* entry can override vendorId/productId/subsystem.
   // UARTs match the tty node (what serialport opens), not the raw USB
   // device; ST-Links match the USB device (st-flash talks libusb).
   KIND_DEFAULTS = {
@@ -173,10 +169,7 @@ function syncUdevRules(cfg, { log = console } = {}){
 
   if (content){
     for (const { file: other, symlink }of findConflicts(cfg.instance, content)){
-      log.warn(
-        `udev: ${other} also defines /dev/${symlink}` +
-          (other === LEGACY_RULES_FILE ? ' — it is superseded by the Client config; delete it.' : '.')
-      );
+      log.warn(`udev: ${other} also defines /dev/${symlink}.`);
     }
   }
 
@@ -204,7 +197,7 @@ function syncUdevRules(cfg, { log = console } = {}){
   return { status: 'updated', file };
 }
 
-module.exports = { renderRules, syncUdevRules, rulesFile, KIND_DEFAULTS, LEGACY_RULES_FILE, HUB_POWER_RULE };
+module.exports = { renderRules, syncUdevRules, rulesFile, HUB_POWER_RULE };
 
 // systemd ExecStartPre=+ entry point (runs as root, before the daemon
 // drops to its own user): `node udev.js --config <path>`.

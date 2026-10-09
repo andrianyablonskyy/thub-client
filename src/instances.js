@@ -68,10 +68,8 @@ function register(name, type){
     raw = exists ? readConfig(configPath) : readConfig(paths.configPath);
   if (!exists){
     delete raw.name;
-    delete raw.sw; // older files: an SW Client has no settings any more
     if (type === 'sw'){
       delete raw['hw-devices'];
-      delete raw.hw;
     }
   }
   raw.type = type;

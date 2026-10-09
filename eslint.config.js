@@ -29,6 +29,9 @@ module.exports = [
     },
     rules: {
       // Core JS
+      // Dead code: unused variables, imports and functions. Unused trailing
+      // arguments are fine when named _x (an Express error handler's next).
+      'no-unused-vars': ['error', { args: 'after-used', argsIgnorePattern: '^_', caughtErrors: 'none', ignoreRestSiblings: true }],
       'prefer-const': 'error',
       strict: ['error', 'global'],
       camelcase: [

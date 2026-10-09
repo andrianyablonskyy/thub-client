@@ -44,4 +44,4 @@ function scanUsb({ command = 'lsusb' } = {}){
   });
 }
 
-module.exports = { scanUsb, LSUSB_ARGS: ARGS };
+module.exports = { scanUsb };

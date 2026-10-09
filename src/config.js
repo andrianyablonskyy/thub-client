@@ -15,7 +15,7 @@
 
 const fs = require('node:fs'),
   {
-    validateClientConfig, shareableClientConfigFile, importClientConfigFile, withoutPowerControl, hwDevicesOf, HW_DEVICES_SECTION
+    validateClientConfig, shareableClientConfigFile, importClientConfigFile, hwDevicesOf, HW_DEVICES_SECTION
   } = require('@andrian.yablonskyy/thub-common'),
   os = require('node:os'),
   path = require('node:path'),
@@ -85,9 +85,9 @@ function loadConfig(configPath = process.env.THUB_CLIENT_CONFIG, overrides = {})
     varDir = raw.varDir || path.join(process.cwd(), '.data'),
     runDir = raw.runDir || varDir,
 
-    // `hw-devices` (older files: `hw`); an older file's `sw` section is
-    // ignored — an SW Client has no settings of its own.
-    hw = resolveHwConfig(hwDevicesOf(raw) || {}),
+    // `hw-devices`, checked against the shared schema (an HW Client's; an
+    // SW Client has no settings of its own).
+    hw = resolveHwConfig(hwSection(raw), raw.type),
 
     config = {
       coordinatorUrl: raw.coordinatorUrl,
@@ -123,8 +123,6 @@ function loadConfig(configPath = process.env.THUB_CLIENT_CONFIG, overrides = {})
       // The dashboard config revision (Config tab) this instance has applied.
       configRevisionFile: raw.configRevisionFile || path.join(varDir, instance, 'config-revision.json'),
       rebootRequestFile: raw.rebootRequestFile || path.join(varDir, 'reboot-request.json'),
-      // `sources` / `artifactory` sections left in an older file are
-      // ignored: a Client fetches a job's inputs from wherever the job says.
       hw,
       heartbeatIntervalSec: raw.heartbeatIntervalSec || 10,
       longPollWaitSec: raw.longPollWaitSec || 30,
@@ -162,7 +160,7 @@ function loadConfig(configPath = process.env.THUB_CLIENT_CONFIG, overrides = {})
 function loadDeviceConfig(configPath = process.env.THUB_CLIENT_CONFIG){
   const candidate = findConfigFile(configPath),
     raw = JSON.parse(fs.readFileSync(candidate, 'utf8')) || {};
-  return { instance: instanceName(candidate), type: raw.type, hw: resolveHwConfig(hwDevicesOf(raw) || {}) };
+  return { instance: instanceName(candidate), type: raw.type, hw: resolveHwConfig(hwSection(raw), raw.type) };
 }
 
 function readOrCreateClientId(clientIdFile){
@@ -181,12 +179,6 @@ function readOrCreateClientId(clientIdFile){
   return id;
 }
 
-function assertSlotIndex(field, index){
-  if (!Number.isInteger(index) || index < 0 || index >= MAX_SLOTS){
-    throw new Error(`${field} must be an integer 0-${MAX_SLOTS - 1}, got ${index}`);
-  }
-}
-
 // udev symlinks are named 1-based (dut1..dut8).
 function assertDeviceIndex(field, index){
   if (!Number.isInteger(index) || index < 1 || index > MAX_SLOTS){
@@ -198,6 +190,13 @@ function assertDeviceIndex(field, index){
 function devicePath(index, kind){
   return `/dev/thub/dut${index}-${kind}`;
 }
+
+const LIST_FIELDS = ['uarts', 'usbs', 'stlinks'],
+  // Device list entries as the schema and the dashboard see them: always
+  // objects — the shorthand forms (a udev index number, a path string)
+  // spelled out.
+  asDeviceObjects = (list) => (Array.isArray(list) ? list : []).map((e) =>
+    typeof e === 'number' ? { index: e } : typeof e === 'string' ? { path: e } : e);
 
 function assertListSize(field, list){
   if (!Array.isArray(list)){
@@ -230,53 +229,55 @@ function resolveDeviceList(field, list, kind){
 }
 
 // §8.2/§8.6: up to MAX_DEVICES_PER_LIST each of UART adapters (or boards'
-// own USB serial ports), DUT USB devices and ST-Link probes per Client. The single-device fields (`uart`,
-// `stlinkSerial`) are still accepted and fold into the matching list when
-// that list isn't set. Power control left in an older file (hw.relays,
-// hw.power) is ignored: Clients no longer have any.
-function resolveHwConfig(hw){
-  const { uart, stlinkSerial, ...rest } = withoutPowerControl(hw).section,
-    uarts = rest.uarts || (uart ? [uart] : []),
-    stlinks = rest.stlinks || (stlinkSerial ? [{ serial: stlinkSerial }] : []);
+// own USB serial ports), DUT USB devices and ST-Link probes per Client. An
+// HW Client's section is checked against the shared schema first (shorthand
+// entries spelled out): a field it doesn't know stops the start, named.
+// The `hw-devices` section; an HW Client's file that still says `hw` would
+// otherwise start with no devices at all.
+function hwSection(raw){
+  if (raw.type === 'hw' && raw.hw !== undefined){
+    throw new Error(`the \`hw\` section is named \`${HW_DEVICES_SECTION}\` now: rename it`);
+  }
+  return hwDevicesOf(raw) || {};
+}
 
+function resolveHwConfig(hw, type = 'hw'){
+  if (type === 'hw'){
+    const spelledOut = Object.fromEntries(Object.entries(hw).map(([k, v]) =>
+        [k, LIST_FIELDS.includes(k) && Array.isArray(v) ? asDeviceObjects(v) : v])),
+      { valid, errors } = validateClientConfig('hw', spelledOut);
+    if (!valid){
+      throw new Error(errors.join('; '));
+    }
+  }
   return {
-    ...rest,
-    uarts: resolveDeviceList(`${HW_DEVICES_SECTION}.uarts`, uarts, 'uart'),
-    usbs: resolveDeviceList(`${HW_DEVICES_SECTION}.usbs`, rest.usbs || [], 'usb'),
-    stlinks: resolveDeviceList(`${HW_DEVICES_SECTION}.stlinks`, stlinks, 'stlink')
+    ...hw,
+    uarts: resolveDeviceList(`${HW_DEVICES_SECTION}.uarts`, hw.uarts || [], 'uart'),
+    usbs: resolveDeviceList(`${HW_DEVICES_SECTION}.usbs`, hw.usbs || [], 'usb'),
+    stlinks: resolveDeviceList(`${HW_DEVICES_SECTION}.stlinks`, hw.stlinks || [], 'stlink')
   };
 }
 
 // ---- Capabilities edited from the dashboard (README §10, Config tab) ----
 
-// Device list entries as the dashboard sees them: always objects — the
-// shorthand forms (a udev index number, a path string) spelled out.
-const asDeviceObjects = (list) => (Array.isArray(list) ? list : []).map((e) =>
-  typeof e === 'number' ? { index: e } : typeof e === 'string' ? { path: e } : e);
-
 // The editable part of this Client's config: an HW Client's hw-devices as
-// in the file, normalized (shorthand entries, legacy single-device fields);
-// an SW Client's is empty. Reported at registration.
+// in the file, its shorthand entries spelled out; an SW Client's is empty.
+// Reported at registration.
 function readEditableConfig(configPath, type){
-  const raw = JSON.parse(fs.readFileSync(configPath, 'utf8')) || {},
-    section = { ...(hwDevicesOf(raw) || {}) };
-  if (type === 'hw'){
-    const { uart, stlinkSerial, ...rest } = withoutPowerControl(section).section,
-      out = {
-        ...rest,
-        stlinks: asDeviceObjects(rest.stlinks || (stlinkSerial ? [{ serial: stlinkSerial }] : [])),
-        uarts: asDeviceObjects(rest.uarts || (uart ? [uart] : [])),
-        usbs: asDeviceObjects(rest.usbs)
-      };
-    return out;
+  if (type !== 'hw'){
+    return {};
   }
-  return {};
+  const section = hwDevicesOf(JSON.parse(fs.readFileSync(configPath, 'utf8')) || {}) || {};
+  return {
+    ...section,
+    stlinks: asDeviceObjects(section.stlinks),
+    uarts: asDeviceObjects(section.uarts),
+    usbs: asDeviceObjects(section.usbs)
+  };
 }
 
-// The whole config file as it's shared (legacy sections left out) —
-// reported at registration for the dashboard's Export.
 // The config file as reported to the Coordinator (for the dashboard's
-// Export): legacy sections dropped, and never the joinKey.
+// Export), never with the joinKey.
 function readShareableConfigFile(configPath){
   const { joinKey, ...file } = shareableClientConfigFile(JSON.parse(fs.readFileSync(configPath, 'utf8')) || {});
   return file;
@@ -285,17 +286,14 @@ function readShareableConfigFile(configPath){
 const pick = (obj, keys) => Object.fromEntries(keys.filter((k) => obj[k] !== undefined && obj[k] !== '').map((k) => [k, obj[k]]));
 
 // Applies a dashboard edit to the config file: validated (the shared schema,
-// then exactly as loadConfig would resolve it), legacy single-device fields
-// dropped, and written atomically — an HW Client's devices under
-// `hw-devices`, older `hw` / `sw` sections removed. Throws with a
+// then exactly as loadConfig would resolve it) and written atomically — an
+// HW Client's devices under `hw-devices`. Throws with a
 // readable reason if it can't be applied. `fields`: an Import's other
 // top-level fields — filtered here again (never joinKey, coordinatorUrl,
 // name, this Client's id or paths). `identity`: { coordinatorUrl, name,
 // type, joinKey? } the running Client uses, written into the file as they
 // are, so a restart comes back with the same ones.
 function applyEditableConfig(configPath, type, section, fields = null, identity = null){
-  // A revision saved before power control was removed may still carry it.
-  section = type === 'hw' ? withoutPowerControl(section).section : section;
   const { valid, errors } = validateClientConfig(type, section);
   if (!valid){
     throw new Error(errors.join('; '));
@@ -311,9 +309,7 @@ function applyEditableConfig(configPath, type, section, fields = null, identity 
   if (type === 'hw'){
     resolveHwConfig({ ...section }); // throws where loadConfig would
   }
-  // hw-devices replaces an older `hw` section; `sw` is gone.
-  const { hw: _hw, sw: _sw, ...rest } = raw,
-    pinned = { ...rest, ...(identity ? pick(identity, ['coordinatorUrl', 'name', 'type', 'joinKey']) : {}) },
+  const pinned = { ...raw, ...(identity ? pick(identity, ['coordinatorUrl', 'name', 'type', 'joinKey']) : {}) },
     next = type === 'hw' ? { ...pinned, [HW_DEVICES_SECTION]: section } : pinned,
     mode = fs.statSync(configPath).mode & 0o777,
     tmp = `${configPath}.tmp-${process.pid}`;
@@ -334,12 +330,6 @@ function readAppliedConfigRevision(file){
 function writeAppliedConfigRevision(file, revision, error = null){
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, JSON.stringify({ revision, error, at: new Date().toISOString() }) + '\n');
-}
-
-function saveConfigField(configPath, key, value){
-  const raw = JSON.parse(fs.readFileSync(configPath, 'utf8')) || {};
-  raw[key] = value;
-  fs.writeFileSync(configPath, JSON.stringify(raw, null, 2) + '\n');
 }
 
 // Stored as JSON so a restarted daemon knows its resourceId without
@@ -367,13 +357,6 @@ module.exports = {
   applyEditableConfig,
   readAppliedConfigRevision,
   writeAppliedConfigRevision,
-  saveConfigField,
   readCredentials,
-  writeCredentials,
-  readOrCreateClientId,
-  assertSlotIndex,
-  assertDeviceIndex,
-  devicePath,
-  MAX_SLOTS,
-  MAX_DEVICES_PER_LIST
+  writeCredentials
 };

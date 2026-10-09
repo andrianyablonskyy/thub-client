@@ -2,6 +2,14 @@
 
 What changed in each release, newest first. `## Unreleased` collects the changes since the version on npm; `bin/publish` turns that heading into the version and date it releases.
 
+## Unreleased
+
+### Removed
+
+- **Old config shapes.** The Client reads `hw-devices` only: an HW Client's file that still has a `hw` section stops the start, asking to rename it. `hw-devices` is checked against its schema at start, so old fields (`uart`, `stlinkSerial`, `relays`, `power`) stop it too, named. Write `uarts` / `stlinks` lists instead of the single-device fields, and remove the power-control fields. `sw`, `artifactory` and `sources` sections are no longer stripped on a dashboard save; they were unused already.
+- **The `99-thub.rules` hint.** A conflicting udev rule is reported like any other; delete a leftover `/etc/udev/rules.d/99-thub.rules` (thub-client ≤ 1.0.17) by hand.
+- Unused code and the `uuid` dependency.
+
 ## 1.1.15 — 2026-10-09
 
 Changes since 1.1.14.

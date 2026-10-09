@@ -115,4 +115,4 @@ async function waitUntilIdle(runDir, holdFile, { maxWaitMs, what, sleepMs = POLL
   }
 }
 
-module.exports = { readHold, writeHold, busyInstances, waitUntilIdle, canceled, currentBootId, HOLD_GRACE_MS, HOLD_MAX_AGE_MS };
+module.exports = { readHold, writeHold, waitUntilIdle, canceled, HOLD_GRACE_MS };

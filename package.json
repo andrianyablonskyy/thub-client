@@ -19,9 +19,8 @@
     "lint:fix": "eslint . --fix"
   },
   "dependencies": {
-    "@andrian.yablonskyy/thub-common": "^1.1.12",
-    "commander": "^13.1.0",
-    "uuid": "^11.1.0"
+    "@andrian.yablonskyy/thub-common": "^2.0.0",
+    "commander": "^13.1.0"
   },
   "devDependencies": {
     "@stylistic/eslint-plugin": "^5.10.0",

@@ -113,7 +113,7 @@ If two instances instead share the exact same config file (told apart only by `n
 
 **SW Clients** (`type: sw`) have no settings of their own: an SW job is its command. The Client never pulls images or starts containers and doesn't need Docker or git; a job's command does whatever it needs, with credentials passed as `--env`. An older file's `sw` section is ignored.
 
-**HW Clients** (`type: hw`): the `hw-devices` section (older files: `hw`, still read) — up to 16 each of `stlinks`, `uarts`, `usbs` (entries: udev index 1–8 → `/dev/thub/dut<N>-stlink|uart|usb`, a path, or `{ index | path, ... }`; ST-Link entries may give `serial`, UARTs `baudRate` and `label`; any of them `devpath` plus optional `vendorId`/`productId`/`subsystem` to get a udev symlink rule). The legacy `stlinkSerial` and `uart` fields still work. Power control from older versions (`relays`, `power`) is ignored, and so are the old `artifactory` and `sources` sections: the Client fetches a job's `--download-file` files from wherever the job says, without credentials of its own.
+**HW Clients** (`type: hw`): the `hw-devices` section, checked against its schema at start — up to 16 each of `stlinks`, `uarts`, `usbs` (entries: udev index 1–8 → `/dev/thub/dut<N>-stlink|uart|usb`, a path, or `{ index | path, ... }`; ST-Link entries may give `serial`, UARTs `baudRate` and `label`; any of them `devpath` plus optional `vendorId`/`productId`/`subsystem` to get a udev symlink rule). The Client fetches a job's `--download-file` files from wherever the job says, without credentials of its own.
 
 Example SW config:
 

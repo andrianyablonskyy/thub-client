@@ -1,6 +1,6 @@
 /**
  * @file        packages/client/test/udev.test.js
- * @description Tests: udev rule rendering from the hw.* config (udev.js)
+ * @description Tests: udev rule rendering from the hw-devices config (udev.js)
  *
  * @author      Andrian Yablonskyy
  * @copyright   Copyright (c) 2026 Andrian Yablonskyy. All rights reserved.
@@ -25,7 +25,7 @@ const test = require('node:test'),
 function deviceConfig(hw, type = 'hw'){
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'thub-udev-')),
     file = path.join(dir, 'dut1.json');
-  fs.writeFileSync(file, JSON.stringify({ type, hw }));
+  fs.writeFileSync(file, JSON.stringify({ type, 'hw-devices': hw }));
   return loadDeviceConfig(file);
 }
 
@@ -71,5 +71,5 @@ test('no rules for a SW Client, or for entries without a devpath', () => {
 test('rejects values that could break out of a udev rule', () => {
   assert.throws(() => renderRules(deviceConfig({ uarts: [{ index: 1, devpath: '1.1", RUN+="/bin/sh' }] })), /devpath/);
   assert.throws(() => renderRules(deviceConfig({ uarts: [{ index: 1, devpath: '1.1', vendorId: 'xyz' }] })), /vendorId/);
-  assert.throws(() => renderRules(deviceConfig({ uarts: [{ path: '/tmp/uart', devpath: '1.1' }] })), /under \/dev\//);
+  assert.throws(() => renderRules(deviceConfig({ uarts: [{ path: '/tmp/uart', devpath: '1.1' }] })), /\/dev\//);
 });
