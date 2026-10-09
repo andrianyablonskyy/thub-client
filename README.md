@@ -1,8 +1,16 @@
 # @andrian.yablonskyy/thub-client
 
-The Client (`thub-client`) component of [TestHub](https://github.com/andrianyablonskyy/thub) — a self-hosted job network that lets CI/CD pipelines and individual developers run firmware tests on real hardware or emulators in a private lab. This is the daemon that runs on lab machines, executes test jobs against a DUT, streams logs back, and uploads results. It owns exactly one DUT slot per process — a machine with two boards runs two instances with different configs.
+The Client (`thub-client`) component of TestHub — a self-hosted job network that lets CI/CD pipelines and individual developers run firmware tests on real hardware or emulators in a private lab. This is the daemon that runs on lab machines, executes test jobs against a DUT, streams logs back, and uploads results. It owns exactly one DUT slot per process — a machine with two boards runs two instances with different configs.
 
-Clients only make **outbound** connections to the [Coordinator](https://github.com/andrianyablonskyy/thub-coordinator) — nothing in the lab needs to be exposed. 
+Clients only make **outbound** connections to the [Coordinator](https://github.com/users/andrianyablonskyy/packages/container/package/thub-coordinator) — nothing in the lab needs to be exposed. The Coordinator runs from its Docker image; the `THUB_CLIENT_JOIN_KEY` it starts with is the `joinKey` in each Client's config:
+
+```bash
+docker run -d --name thub -p 8080:8080 -v thub-data:/var/lib/thub \
+  -e THUB_PUBLIC_URL=https://thub.example.com \
+  -e THUB_SESSION_SECRET="$(openssl rand -hex 32)" -e THUB_CLIENT_JOIN_KEY="$(openssl rand -hex 24)" \
+  -e THUB_ADMIN_PASSWORD='<first admin password>' -e THUB_LICENSE='<license>' \
+  ghcr.io/andrianyablonskyy/thub-coordinator:latest
+```
 
 ## Install
 
