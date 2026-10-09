@@ -1,8 +1,7 @@
 /**
  * @file        scripts/self-update-helper.js
  * @description Root side of the Client's self-update (README §10.2): run by thub-client-update.service when a
- *              Client writes its update request, installs the requested thub-client release with npm i -g from
- *              its git repository
+ *              Client writes its update request, installs the requested thub-client version with npm i -g
  *
  * @author      Andrian Yablonskyy
  * @copyright   Copyright (c) 2026 Andrian Yablonskyy. All rights reserved.
@@ -90,9 +89,7 @@ async function main(){
     }
     console.log(`thub-client-update: v${installedVersion} -> v${target} (requested by ${request.instance || 'a Client'})`);
     // SUDO_USER makes the postinstall scripts target the Client's user, as
-    // a `sudo npm i -g` by that user would (install-target.js). From the
-    // Client's public repository, at that release tag (thub-common's
-    // REPOSITORIES) — nothing from the request but the version.
+    // a `sudo npm i -g` by that user would (install-target.js).
     const status = npmInstallGlobal(PACKAGES.client, target, { env: { ...process.env, SUDO_USER: user } });
     if (status !== 0){
       console.error(`thub-client-update: npm i -g failed (exit ${status})`);

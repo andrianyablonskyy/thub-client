@@ -7,7 +7,7 @@ Clients only make **outbound** connections to the [Coordinator](https://github.c
 ## Install
 
 ```bash
-sudo npm i -g --install-links git+https://github.com/andrianyablonskyy/thub-client.git
+sudo npm i -g @andrian.yablonskyy/thub-client
 ```
 
 That one command is the complete installation. Run as root on Linux, for the user who ran `sudo` (`SUDO_USER` — not root; that user owns every file and runs the service), the package's postinstall scripts:
@@ -33,7 +33,7 @@ sudo apt install -y stlink-tools openocd
 # Capabilities show whether a Client can use it, and why not.
 sudo apt install -y docker.io
 
-sudo npm i -g --install-links git+https://github.com/andrianyablonskyy/thub-client.git
+sudo npm i -g @andrian.yablonskyy/thub-client
 
 # coordinatorUrl, type and joinKey (the Coordinator's clientJoinKey);
 # see "Configuration reference" below for every field
@@ -55,7 +55,7 @@ thub-client deregister --name dut1           # stop + disable thub-client@dut1, 
 
 `--name` defaults to `client` and `--type` to `hw`. From a checkout of this repo the same commands are `npm run register -- --name dut1 --type hw` / `npm run deregister -- --name dut1` (or `npm run client:register -- ...` / `npm run client:deregister -- ...` from the monorepo root). Registering an existing instance keeps its config and only updates `type`. Deregistering keeps `client.json` (the template for new instances) and the instance's state under `varDir`, so re-registering the same name comes back as the same resource. Doing it by hand is equivalent: copy `client.json` to `dut1.json`, then `sudo systemctl enable --now thub-client@dut1`.
 
-Keep `varDir` at the one in `client.json` — the service can only write there, and every per-instance path under it is already namespaced by the config's filename. If you change `client.json`'s `varDir`/`runDir`, re-run `sudo npm i -g --install-links git+https://github.com/andrianyablonskyy/thub-client.git` so the unit's `ReadWritePaths=` follows.
+Keep `varDir` at the one in `client.json` — the service can only write there, and every per-instance path under it is already namespaced by the config's filename. If you change `client.json`'s `varDir`/`runDir`, re-run `sudo npm i -g @andrian.yablonskyy/thub-client` so the unit's `ReadWritePaths=` follows.
 
 Every install step is best-effort and never fails the `npm install` itself, and only runs for an actual global install (`npm install -g`) — a plain local `npm install` (e.g. in a dev checkout, or as root inside a CI/Docker image, which is common) never touches `/etc/systemd`, `~/.config/thub` or `~/var/lib/thub`. A global install without root, or on a non-Linux machine, still creates the directories and `client.json` for the current user, but skips systemd and prints the `sudo npm i -g` command to run instead.
 
@@ -206,7 +206,7 @@ thub-client self-update [--to <x.y.z>]   # sudo npm i -g; restarts every running
 A Client updates only when an admin requested it (Coordinator dashboard: per resource or **Update all clients**) **and** it isn't running a job. A job counts as running until it's completely finished, including the result and the final log flush. The Coordinator sends a `self-update` command in the heartbeat response. The daemon runs sandboxed as an unprivileged user, so it only writes `<varDir>/update-request.json`, once per version and only while idle with no local lock. The root `thub-client-update.path` unit, installed and enabled by `sudo npm i -g`, starts `thub-client-update.service`, which:
 1. creates `<varDir>/update-hold.json`. While it exists no instance on the host takes a new job, and each shows on the Coordinator as busy (`local — self-update in progress`), so jobs submitted meanwhile stay queued;
 2. waits 45 s so a job handed out just before the hold is visible, then waits (up to 24 h) until no instance has a job running or a manual lock;
-3. runs `npm i -g --install-links git+https://github.com/andrianyablonskyy/thub-client.git#v<version>` for the Client's user. That restarts every instance on the new version;
+3. runs `npm i -g @andrian.yablonskyy/thub-client@<version>` for the Client's user. That restarts every instance on the new version;
 4. removes the hold, also on failure or `systemctl stop`. A hold older than 2 h is ignored.
 
 An admin can abort it until the moment it installs with **Cancel** on the Coordinator's resource card: the Client deletes the hold and the helper stops without installing. The same button cancels the Client's running job (aborting a download in progress) or releases a manual local lock.

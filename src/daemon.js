@@ -30,7 +30,7 @@ const fs = require('node:fs'),
   { scanUsb } = require('./usb-scan'),
   { UsbPower } = require('./usb-power'),
   { readHold } = require('./host-hold'),
-  { PACKAGES, isNewer, installCommand } = require('@andrian.yablonskyy/thub-common'),
+  { PACKAGES, isNewer } = require('@andrian.yablonskyy/thub-common'),
   { version } = require('../package.json');
 
 // Installed by scripts/install-systemd-unit.js; runs the actual `npm i -g`
@@ -556,7 +556,7 @@ class Daemon{
     if (!fs.existsSync(UPDATE_PATH_UNIT)){
       console.warn(
         `self-update to v${target} requested, but ${UPDATE_PATH_UNIT} isn't installed — ` +
-          `update by hand: ${installCommand(PACKAGES.client, target)}`
+          `update by hand: sudo npm i -g ${PACKAGES.client}@${target}`
       );
       return;
     }

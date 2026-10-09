@@ -36,8 +36,7 @@ const fs = require('node:fs'),
   REBOOT_PATH_UNIT = 'thub-client-reboot.path',
   REBOOT_SERVICE_UNIT = 'thub-client-reboot.service',
   REBOOT_HELPER = path.join(__dirname, 'reboot-helper.js'),
-  // The Client installs from its git repository, not npm (README §8.5).
-  MANUAL_HINT = 'sudo npm i -g --install-links git+https://github.com/andrianyablonskyy/thub-client.git',
+  MANUAL_HINT = 'sudo npm i -g @andrian.yablonskyy/thub-client',
 
   // Device access (serial adapters, ST-Link/USB probes) and, for SW
   // Clients, the Docker socket. Granted to the service only, without

@@ -25,8 +25,7 @@ const fs = require('node:fs'),
   { sendCommand } = require('./control-socket'),
   { register, deregister } = require('./instances'),
   {
-    PACKAGES, NPM_INSTALL_ARGS, fetchLatestVersion, installSpec, isNewer, isValidVersion, npmBin, POWER_ACTIONS, DEFAULT_RESET_DELAY_SEC,
-    powerRequestErrors
+    PACKAGES, fetchLatestVersion, isNewer, isValidVersion, npmBin, POWER_ACTIONS, DEFAULT_RESET_DELAY_SEC, powerRequestErrors
   } = require('@andrian.yablonskyy/thub-common'),
   { version } = require('../package.json');
 
@@ -255,7 +254,7 @@ program
 // through thub-client-update.service instead.
 program
   .command('check-update')
-  .description('Compare this Client with the latest release (its repository\'s newest vX.Y.Z tag)')
+  .description('Compare this Client with the latest published version')
   .action(async () => {
     try {
       const latest = await fetchLatestVersion(PACKAGES.client);
@@ -270,7 +269,7 @@ program
 
 program
   .command('self-update')
-  .description('Update this Client from its git repository with sudo npm i -g (restarts every running instance)')
+  .description('Update this Client with sudo npm i -g (restarts every running instance)')
   .option('--to <x.y.z>', 'Install this version instead of the latest')
   .action(async (opts) => {
     try {
@@ -282,7 +281,7 @@ program
         console.log(`Already on v${version}.`);
         return;
       }
-      const npmArgs = [...NPM_INSTALL_ARGS, installSpec(PACKAGES.client, target)],
+      const npmArgs = ['i', '-g', `${PACKAGES.client}@${target}`],
         [bin, argv] = process.getuid?.() === 0 ? [npmBin(), npmArgs] : ['sudo', [npmBin(), ...npmArgs]];
       console.log(`Updating v${version} -> v${target}: ${[bin, ...argv].join(' ')}`);
       process.exit(spawnSync(bin, argv, { stdio: 'inherit' }).status ?? 1);

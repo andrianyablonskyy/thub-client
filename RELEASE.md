@@ -2,6 +2,14 @@
 
 What changed in each release, newest first. `## Unreleased` collects the changes since the version on npm; `bin/publish` turns that heading into the version and date it releases.
 
+## Unreleased
+
+Changes since 1.1.14.
+
+### Changed
+
+- **Back on npm.** Install with `npm i -g @andrian.yablonskyy/thub-client`. `check-update`, `self-update` and dashboard-requested updates use npm again, and require thub-common from npm. The git-based updates in the versions released only as git tags (1.1.13–1.1.14) are gone. An install of one of those updates from git tags, which are still pushed with every release, so it keeps updating.
+
 ## 1.1.14 — 2026-10-08
 
 Changes since 1.1.13.
