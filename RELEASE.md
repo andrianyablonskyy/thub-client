@@ -2,7 +2,7 @@
 
 What changed in each release, newest first. `## Unreleased` collects the changes since the version on npm; `bin/publish` turns that heading into the version and date it releases.
 
-## Unreleased
+## 1.1.15 — 2026-10-09
 
 Changes since 1.1.14.
 
