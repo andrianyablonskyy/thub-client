@@ -2,6 +2,12 @@
 
 What changed in each release, newest first. `## Unreleased` collects the changes since the version on npm; `bin/publish` turns that heading into the version and date it releases.
 
+## Unreleased
+
+### Changed
+
+- **A Coordinator whose license has no room for another runner** (`402` at registration, README §13.5): the Client logs the reason and tries again every minute, instead of exiting and being restarted by systemd. Any other refusal still stops it as before.
+
 ## 1.1.16 — 2026-10-09
 
 ### Removed

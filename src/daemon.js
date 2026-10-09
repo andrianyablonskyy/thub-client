@@ -40,7 +40,9 @@ const UPDATE_PATH_UNIT = '/etc/systemd/system/thub-client-update.path',
   // While a job runs, commands are long-polled for this long at a time, so
   // its owner's power reset (or a cancel) lands within a second rather than
   // with the next heartbeat.
-  COMMANDS_WAIT_SEC = 25;
+  COMMANDS_WAIT_SEC = 25,
+  // How often a Client the license has no room for tries to register again.
+  LICENSE_RETRY_SEC = 60;
 
 // Every address on this host's network interfaces except loopback, for
 // the dashboard's resource card. The external address isn't known here —
@@ -145,10 +147,31 @@ class Daemon{
   // the first time ever (registry.registerAuto does the actual update).
   // Falls back to a previously-stored token only when joinKey has been
   // deliberately stripped out of the config after initial setup.
+  // Registration the Coordinator's license has no room for (402: all its
+  // runners taken, README §13.5): waits here and tries again, rather than
+  // exiting into systemd's restart loop, so it gets in once there's room.
+  async _register(anon, registration){
+    for (;;){
+      try {
+        return await anon.post('/resources/register', registration);
+      }
+      catch (err){
+        if (err.status !== 402 || this.stopped){
+          throw err;
+        }
+        console.error(`Not registered: ${err.message} Trying again in ${LICENSE_RETRY_SEC} s.`);
+        await sleep(LICENSE_RETRY_SEC * 1000, this.shutdown.signal);
+        if (this.stopped){
+          throw err;
+        }
+      }
+    }
+  }
+
   async _ensureRegistered(){
     if (this.config.joinKey){
       const anon = new ClientApiClient({ baseUrl: this.config.coordinatorUrl, token: this.config.joinKey }),
-        { resourceId, resourceToken, heartbeatIntervalSec } = await anon.post('/resources/register', {
+        registration = {
           clientId: this.config.clientId,
           name: this.config.name,
           type: this.config.type,
@@ -166,7 +189,8 @@ class Daemon{
           // and the whole file for its Export.
           config: this._editableConfig(),
           configFile: this._shareableConfigFile()
-        });
+        },
+        { resourceId, resourceToken, heartbeatIntervalSec } = await this._register(anon, registration);
       writeCredentials(this.config.tokenFile, { resourceId, resourceToken });
       this.resourceId = resourceId;
       this.client = new ClientApiClient({ baseUrl: this.config.coordinatorUrl, token: resourceToken });
