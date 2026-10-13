@@ -20,14 +20,22 @@ const path = require('node:path');
 // and re-enumerates its USB serial port) is tried again.
 const REOPEN_MS = 500;
 
+// serialport is an optional dependency of thub-client: installed with it
+// where its native addon builds or has a prebuilt one. null without it.
 function loadSerialPort(){
   try {
     return require('serialport').SerialPort;
   }
   catch {
-    throw new Error('HW executor needs the \'serialport\' package installed on the Client host (npm install serialport)');
+    return null;
   }
 }
+
+// Said in the job's log when there's no serialport: the job runs anyway,
+// only its UARTs aren't captured.
+const NO_SERIALPORT = 'UART capture off: the \'serialport\' package isn\'t installed on this Client host, so this job runs ' +
+  'without the uart log stream. Reinstall the Client (sudo npm i -g @andrian.yablonskyy/thub-client), or add it: ' +
+  'cd "$(npm root -g)/@andrian.yablonskyy/thub-client" && sudo npm install serialport, then restart the Client.';
 
 // The tag on a UART's lines in the `uart` stream: its `label`, else its
 // device's file name (/dev/thub/dut2-usb → dut2-usb). A lone UART without a
@@ -121,11 +129,12 @@ class UartCapture{
 // the job: its command uses them by those paths (or st-flash's own probe
 // selection) as it sees fit.
 class HwExecutor{
-  // `SerialPort`, `reopenMs`: for tests.
-  constructor(config, logShipper, { SerialPort = null, reopenMs = REOPEN_MS } = {}){
+  // `SerialPort`, `loadSerialPort`, `reopenMs`: for tests.
+  constructor(config, logShipper, { SerialPort = null, loadSerialPort: load = loadSerialPort, reopenMs = REOPEN_MS } = {}){
     this.config = config.hw || {};
     this.logShipper = logShipper;
     this.SerialPort = SerialPort;
+    this.loadSerialPort = load;
     this.reopenMs = reopenMs;
     this.captures = [];
   }
@@ -151,8 +160,12 @@ class HwExecutor{
     if (!uarts.length){
       return;
     }
-    const SerialPort = this.SerialPort || loadSerialPort(),
+    const SerialPort = this.SerialPort || this.loadSerialPort(),
       push = (stream, line) => this.logShipper.push(stream, line);
+    if (!SerialPort){
+      push('runner', NO_SERIALPORT);
+      return;
+    }
     for (const uart of uarts){
       const capture = new UartCapture(uart, uartTag(uart, uarts.length), { SerialPort, push, reopenMs: this.reopenMs });
       this.captures.push(capture);

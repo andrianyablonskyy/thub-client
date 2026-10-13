@@ -2,6 +2,13 @@
 
 What changed in each release, newest first. `## Unreleased` collects the changes since the version on npm; `bin/publish` turns that heading into the version and date it releases.
 
+## Unreleased
+
+### Changed
+
+- **No `serialport`, no failed jobs.** A Client host without the `serialport` package failed every job of an HW Client with UARTs in `ERROR` ("HW executor needs the 'serialport' package installed"). Such jobs now run, and the job's log says UART capture is off and how to add it.
+- **`serialport` is an optional dependency**, installed with thub-client (prebuilt binaries for amd64 and arm64). An install where it can't be added still succeeds.
+
 ## 1.1.20 — 2026-10-13
 
 ### Changed

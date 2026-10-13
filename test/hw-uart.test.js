@@ -145,3 +145,13 @@ test('teardown stops the retries', async () => {
   await wait(50);
   assert.equal(serial.opens('/dev/thub/never'), tries);
 });
+
+test('no serialport on the Client host: the job still runs, its log says UART capture is off and how to turn it on', async () => {
+  const log = shipper(),
+    hw = new HwExecutor({ hw: { uarts: FIVE } }, log, { loadSerialPort: () => null });
+  await hw.prepare(); // doesn't throw: the job's command runs
+  await hw.teardown();
+  assert.equal(log.lines.length, 1);
+  assert.match(log.lines[0], /^runner UART capture off: the 'serialport' package isn't installed on this Client host/);
+  assert.match(log.lines[0], /sudo npm install serialport, then restart the Client\.$/);
+});
