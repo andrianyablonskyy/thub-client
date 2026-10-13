@@ -57,12 +57,22 @@ function fakeSerial(){
       port.emit('close', Object.assign(new Error('disconnected'), { disconnected: true }));
     },
     say: (path, text) => live(path).emit('data', Buffer.from(text)),
+    isOpen: (path) => Boolean(live(path)),
     fail: (path, message) => live(path).emit('error', new Error(message)),
     opens: (path) => ports.filter((p) => p.path === path).length
   };
 }
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms)),
+  // Until `ready()` holds, polled: fixed sleeps fail on a loaded machine
+  // (the whole suite runs in parallel). Throws after `ms`.
+  until = async (ready, ms = 5000) => {
+    for (const start = Date.now(); !ready(); await wait(5)){
+      if (Date.now() - start > ms){
+        throw new Error(`not ready after ${ms} ms`);
+      }
+    }
+  },
   shipper = () => {
     const lines = [];
     return { lines, push: (stream, line) => lines.push(`${stream} ${line}`) };
@@ -84,15 +94,15 @@ test('ten UARTs of five boards: each tagged; a USB port that resets is captured 
   FIVE.forEach((u) => serial.plug(u.path));
   const hw = new HwExecutor({ hw: { uarts: FIVE } }, log, { SerialPort: serial.SerialPort, reopenMs: 20 });
   await hw.prepare();
-  await wait(10);
+  await until(() => FIVE.every((u) => serial.isOpen(u.path)));
   serial.say('/dev/thub/dut1-uart', 'boot ok\r\n');
   serial.say('/dev/thub/dut2-usb', 'usb hello');
 
   // Flashing DUT 2 resets it: its USB serial port goes, then comes back.
   serial.unplug('/dev/thub/dut2-usb');
-  await wait(50);
+  await wait(50); // gone for a few reopen tries (reopenMs 20)
   serial.plug('/dev/thub/dut2-usb');
-  await wait(50);
+  await until(() => serial.isOpen('/dev/thub/dut2-usb') && log.lines.some((l) => l.includes('reconnected')));
   serial.say('/dev/thub/dut2-usb', 'after reset');
   await hw.teardown();
 
@@ -113,9 +123,9 @@ test('a UART not there at the start is waited for, said once; serial errors are 
       { SerialPort: serial.SerialPort, reopenMs: 10 });
   serial.plug('/dev/thub/dut1-uart');
   await hw.prepare();
-  await wait(60); // several tries
+  await until(() => serial.isOpen('/dev/thub/dut1-uart') && serial.opens('/dev/thub/dut1-usb') >= 3); // several tries
   serial.plug('/dev/thub/dut1-usb');
-  await wait(30);
+  await until(() => serial.isOpen('/dev/thub/dut1-usb') && log.lines.some((l) => l.includes('connected')));
   serial.fail('/dev/thub/dut1-uart', 'Input/output error'); // no listener would have thrown here
   await hw.teardown();
   assert.deepEqual(log.lines, [
