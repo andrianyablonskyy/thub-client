@@ -73,3 +73,22 @@ test('rejects values that could break out of a udev rule', () => {
   assert.throws(() => renderRules(deviceConfig({ uarts: [{ index: 1, devpath: '1.1', vendorId: 'xyz' }] })), /vendorId/);
   assert.throws(() => renderRules(deviceConfig({ uarts: [{ path: '/tmp/uart', devpath: '1.1' }] })), /\/dev\//);
 });
+
+test('a udev filter: its device gets /dev/thub/dut<index>-<kind>; it replaces devpath and ids', () => {
+  const cfg = deviceConfig({
+    uarts: [{ index: 2, baudRate: 115200, udev: 'SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", ATTRS{serial}=="A9XYZ"' }],
+    usbs: [{ index: 1, udev: 'SUBSYSTEM == "tty" , ENV{ID_SERIAL_SHORT}=="0670FF"' }]
+  });
+  assert.equal(cfg.hw.uarts[0].path, '/dev/thub/dut2-uart');
+  assert.deepEqual(rules(cfg), [
+    'SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", ATTRS{serial}=="A9XYZ", SYMLINK+="thub/dut2-uart"',
+    'SUBSYSTEM=="tty", ENV{ID_SERIAL_SHORT}=="0670FF", SYMLINK+="thub/dut1-usb"'
+  ]);
+});
+
+test('a filter that could do more than match never reaches the rule file: the Client refuses its config', () => {
+  assert.throws(() => deviceConfig({ uarts: [{ index: 1, udev: 'SUBSYSTEM=="tty", RUN+="/bin/sh -c id"' }] }),
+    /hw-devices\.uarts\.0\.udev: .*isn't a udev match/);
+  assert.throws(() => renderRules({ instance: 'x', type: 'hw', hw: { usbs: [{ index: 1, path: '/dev/thub/dut1-usb', udev: 'PROGRAM=="/bin/true"' }] } }),
+    /hw-devices\.usbs\[0\]\.udev: PROGRAM can't be used/);
+});

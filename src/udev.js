@@ -16,20 +16,11 @@
 
 const fs = require('node:fs'),
   path = require('node:path'),
-  { execFileSync } = require('node:child_process');
+  { execFileSync } = require('node:child_process'),
+  { parseUdevFilter, udevFilterOf, LIST_KINDS } = require('@andrian.yablonskyy/thub-common');
 
 const RULES_DIR = '/etc/udev/rules.d',
   SETTLE_TIMEOUT_SEC = 10,
-
-  // Per-kind match defaults: common adapters. Each hw-devices.* entry can override vendorId/productId/subsystem.
-  // UARTs match the tty node (what serialport opens), not the raw USB
-  // device; ST-Links match the USB device (st-flash talks libusb).
-  KIND_DEFAULTS = {
-    stlink: { subsystem: 'usb', vendorId: '0483', productId: '3748' }, // ST-Link/V2
-    uart: { subsystem: 'tty', vendorId: '0403', productId: '6001' }, // FTDI FT232R
-    usb: { subsystem: 'usb', vendorId: '0483', productId: '5740' } // STM32 CDC (DUT's own USB)
-  },
-  LISTS = [['stlinks', 'stlink'], ['uarts', 'uart'], ['usbs', 'usb']],
 
   // uhubctl (hw-devices.usbPower, README §8.7) switches a port through its
   // hub's sysfs `<port>/disable` file (Linux 6+) or over libusb (older):
@@ -43,52 +34,37 @@ function rulesFile(instance){
   return path.join(RULES_DIR, `99-thub-${instance}.rules`);
 }
 
-// Values end up inside "..." in a udev rule — refuse anything that could
-// break out of the quotes or smuggle in another key.
-function assertRuleValue(field, value){
-  if (typeof value !== 'string' || !/^[\w.:+/-]+$/.test(value)){
-    throw new Error(`${field} must be a non-empty string of [A-Za-z0-9_.:+/-], got ${JSON.stringify(value)}`);
+// The symlink ends up inside "..." in a udev rule: nothing that could break
+// out of the quotes or smuggle in another key.
+function symlinkOf(field, devicePath){
+  if (typeof devicePath !== 'string' || !/^\/dev\/[\w.:+/-]+$/.test(devicePath)){
+    throw new Error(`${field}.path must be under /dev/ to get a udev symlink, got ${JSON.stringify(devicePath)}`);
   }
-  return value;
+  return devicePath.slice('/dev/'.length);
 }
 
-function hexId(field, value){
-  const v = assertRuleValue(field, String(value)).toLowerCase();
-  if (!/^[0-9a-f]{4}$/.test(v)){
-    throw new Error(`${field} must be a 4-digit hex USB id, got ${JSON.stringify(value)}`);
-  }
-  return v;
-}
-
-// One rule per hw.* entry that says where the device is plugged in
-// (`devpath`, the USB port path as `udevadm info -a` shows ATTRS{devpath}).
-// Entries without `devpath` are left to whatever already provides their
-// `path` (a manual rule, or a plain /dev node) — so they get no rule here.
+// One rule per hw-devices entry with a udev filter (README §8.6): its own
+// `udev`, or the filter of an older entry's devpath and ids. The filter is
+// checked again here, as this file is installed as root. Entries without
+// one are left to whatever already provides their `path` (a manual rule, or
+// a plain /dev node), so they get no rule here.
 function ruleLines(hw){
   const lines = [];
-  for (const [list, kind]of LISTS){
+  for (const [list, kind]of Object.entries(LIST_KINDS)){
     (hw[list] || []).forEach((entry, i) => {
-      if (entry.devpath === undefined){
+      const filter = udevFilterOf(entry, kind);
+      if (!filter){
         return;
       }
-      const field = `hw.${list}[${i}]`,
-        defaults = KIND_DEFAULTS[kind],
-        devpath = assertRuleValue(`${field}.devpath`, String(entry.devpath)),
-        vendorId = hexId(`${field}.vendorId`, entry.vendorId ?? defaults.vendorId),
-        productId = hexId(`${field}.productId`, entry.productId ?? defaults.productId),
-        subsystem = assertRuleValue(`${field}.subsystem`, entry.subsystem ?? defaults.subsystem);
-      if (typeof entry.path !== 'string' || !entry.path.startsWith('/dev/')){
-        throw new Error(`${field}.path must be under /dev/ to get a udev symlink, got ${JSON.stringify(entry.path)}`);
+      const field = `hw-devices.${list}[${i}]`;
+      let match;
+      try {
+        match = parseUdevFilter(filter);
       }
-      const symlink = assertRuleValue(`${field}.path`, entry.path.slice('/dev/'.length)),
-        // ATTR{devpath} for a usb device itself, ATTRS{devpath} (a parent)
-        // for a tty — ATTRS keys must all match on the same parent, and
-        // idVendor/idProduct/devpath all live on the usb_device.
-        devpathKey = subsystem === 'usb' ? 'ATTR{devpath}' : 'ATTRS{devpath}';
-      lines.push(
-        `SUBSYSTEM=="${subsystem}", ATTRS{idVendor}=="${vendorId}", ATTRS{idProduct}=="${productId}", ` +
-          `${devpathKey}=="${devpath}", SYMLINK+="${symlink}"`
-      );
+      catch (err){
+        throw new Error(`${field}.udev: ${err.message}`);
+      }
+      lines.push(`${match}, SYMLINK+="${symlinkOf(field, entry.path)}"`);
     });
   }
   if (hw.usbPower?.ports?.length){
@@ -98,14 +74,14 @@ function ruleLines(hw){
 }
 
 // null when this instance needs no rules at all (SW Client, or no entry
-// with a devpath and no USB power ports) — its rule file, if any, is then removed.
+// with a udev filter and no USB power ports) — its rule file, if any, is then removed.
 function renderRules({ instance, type, hw }){
   const lines = type === 'hw' ? ruleLines(hw || {}) : [];
   if (!lines.length){
     return null;
   }
   return [
-    `# Generated by thub-client for instance "${instance}" from its config's hw.* section.`,
+    `# Generated by thub-client for instance "${instance}" from its config's hw-devices section.`,
     '# Rewritten on every Client start — edit the config, not this file.',
     ...lines,
     ''
@@ -193,7 +169,7 @@ function syncUdevRules(cfg, { log = console } = {}){
     execFileSync('udevadm', ['trigger', '--action=change', `--subsystem-match=${subsystem}`], { stdio: 'ignore' });
   }
   execFileSync('udevadm', ['settle', `--timeout=${SETTLE_TIMEOUT_SEC}`], { stdio: 'ignore' });
-  log.log(content ? `udev: installed ${file}` : `udev: removed ${file} (no hw devices with a devpath)`);
+  log.log(content ? `udev: installed ${file}` : `udev: removed ${file} (no hw-devices entries with a udev filter)`);
   return { status: 'updated', file };
 }
 

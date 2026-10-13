@@ -2,6 +2,12 @@
 
 What changed in each release, newest first. `## Unreleased` collects the changes since the version on npm; `bin/publish` turns that heading into the version and date it releases.
 
+## Unreleased
+
+### Added
+
+- **udev filters** (README §8.6): an `hw-devices` entry with `"udev": "SUBSYSTEM==\"tty\", ATTRS{serial}==\"…\""` and an `index` gets the rule `<filter>, SYMLINK+="thub/dut<index>-<kind>"`. The filter is checked again before it's written (matches only), and a config with a bad one is refused at start. Entries with `devpath` produce the same rules as before. Needs thub-common 2.1.0.
+
 ## 1.1.17 — 2026-10-09
 
 ### Changed
