@@ -92,3 +92,13 @@ test('a filter that could do more than match never reaches the rule file: the Cl
   assert.throws(() => renderRules({ instance: 'x', type: 'hw', hw: { usbs: [{ index: 1, path: '/dev/thub/dut1-usb', udev: 'PROGRAM=="/bin/true"' }] } }),
     /hw-devices\.usbs\[0\]\.udev: PROGRAM can't be used/);
 });
+
+test('storages: a mass storage device (an ST-Link\'s drive) gets /dev/thub/dut<index>-storage', () => {
+  const cfg = deviceConfig({
+    storages: [{ index: 1, udev: 'SUBSYSTEM=="block", ENV{DEVTYPE}=="disk", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="374e", ATTRS{devpath}=="1.3"' }]
+  });
+  assert.equal(cfg.hw.storages[0].path, '/dev/thub/dut1-storage');
+  assert.deepEqual(rules(cfg), [
+    'SUBSYSTEM=="block", ENV{DEVTYPE}=="disk", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="374e", ATTRS{devpath}=="1.3", SYMLINK+="thub/dut1-storage"'
+  ]);
+});

@@ -63,6 +63,7 @@ function describeTyped(config, run){
       stlinks: (hw.stlinks || []).map((s) => device(s, s.serial ? { serial: s.serial } : {})),
       uarts: (hw.uarts || []).map((u) => device(u, u.baudRate ? { baudRate: u.baudRate } : {})),
       usbs: (hw.usbs || []).map((u) => device(u)),
+      storages: (hw.storages || []).map((u) => device(u)),
       usbPower: describeUsbPower(hw.usbPower, run)
     }
   };

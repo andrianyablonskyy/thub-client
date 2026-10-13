@@ -15,7 +15,7 @@
 
 const fs = require('node:fs'),
   {
-    validateClientConfig, shareableClientConfigFile, importClientConfigFile, hwDevicesOf, HW_DEVICES_SECTION
+    validateClientConfig, shareableClientConfigFile, importClientConfigFile, hwDevicesOf, HW_DEVICES_SECTION, LIST_KINDS
   } = require('@andrian.yablonskyy/thub-common'),
   os = require('node:os'),
   path = require('node:path'),
@@ -191,7 +191,7 @@ function devicePath(index, kind){
   return `/dev/thub/dut${index}-${kind}`;
 }
 
-const LIST_FIELDS = ['uarts', 'usbs', 'stlinks'],
+const LIST_FIELDS = Object.keys(LIST_KINDS),
   // Device list entries as the schema and the dashboard see them: always
   // objects — the shorthand forms (a udev index number, a path string)
   // spelled out.
@@ -252,9 +252,8 @@ function resolveHwConfig(hw, type = 'hw'){
   }
   return {
     ...hw,
-    uarts: resolveDeviceList(`${HW_DEVICES_SECTION}.uarts`, hw.uarts || [], 'uart'),
-    usbs: resolveDeviceList(`${HW_DEVICES_SECTION}.usbs`, hw.usbs || [], 'usb'),
-    stlinks: resolveDeviceList(`${HW_DEVICES_SECTION}.stlinks`, hw.stlinks || [], 'stlink')
+    ...Object.fromEntries(Object.entries(LIST_KINDS).map(([list, kind]) =>
+      [list, resolveDeviceList(`${HW_DEVICES_SECTION}.${list}`, hw[list] || [], kind)]))
   };
 }
 
@@ -270,9 +269,10 @@ function readEditableConfig(configPath, type){
   const section = hwDevicesOf(JSON.parse(fs.readFileSync(configPath, 'utf8')) || {}) || {};
   return {
     ...section,
-    stlinks: asDeviceObjects(section.stlinks),
-    uarts: asDeviceObjects(section.uarts),
-    usbs: asDeviceObjects(section.usbs)
+    // `storages` only when the file has it: a Coordinator from before it
+    // would refuse the list on its next save.
+    ...Object.fromEntries(LIST_FIELDS.filter((list) => list !== 'storages' || section.storages !== undefined)
+      .map((list) => [list, asDeviceObjects(section[list])]))
   };
 }
 

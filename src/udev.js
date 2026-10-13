@@ -165,7 +165,7 @@ function syncUdevRules(cfg, { log = console } = {}){
   execFileSync('udevadm', ['control', '--reload'], { stdio: 'ignore' });
   // `change`, not `add`: re-applies the rules (and so the symlinks)
   // without making anything else treat the devices as newly plugged in.
-  for (const subsystem of ['usb', 'tty']){
+  for (const subsystem of ['usb', 'tty', 'block']){
     execFileSync('udevadm', ['trigger', '--action=change', `--subsystem-match=${subsystem}`], { stdio: 'ignore' });
   }
   execFileSync('udevadm', ['settle', `--timeout=${SETTLE_TIMEOUT_SEC}`], { stdio: 'ignore' });
