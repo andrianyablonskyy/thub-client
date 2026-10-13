@@ -6,6 +6,7 @@ What changed in each release, newest first. `## Unreleased` collects the changes
 
 ### Added
 
+- **Mass storage drives** (`hw-devices.storages`, README §8.6): `/dev/thub/dut<N>-storage` from a udev filter, e.g. an STLINK-V3's drive. They're reported with the capabilities, and `block` devices are re-triggered with `usb` and `tty` after the rules change. `storages` is reported in the editable config only when the file has it, because a Coordinator from before it would refuse the list.
 - **udev filters** (README §8.6): an `hw-devices` entry with `"udev": "SUBSYSTEM==\"tty\", ATTRS{serial}==\"…\""` and an `index` gets the rule `<filter>, SYMLINK+="thub/dut<index>-<kind>"`. The filter is checked again before it's written (matches only), and a config with a bad one is refused at start. Entries with `devpath` produce the same rules as before. Needs thub-common 2.1.0.
 
 ## 1.1.17 — 2026-10-09
