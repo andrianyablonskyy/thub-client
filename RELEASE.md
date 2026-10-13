@@ -2,6 +2,12 @@
 
 What changed in each release, newest first. `## Unreleased` collects the changes since the version on npm; `bin/publish` turns that heading into the version and date it releases.
 
+## Unreleased
+
+### Added
+
+- **A udev filter's own `SYMLINK+="path"`** overrides `thub/dut<index>-<kind>`: the rule makes `/dev/<path>`, and the Client uses that as the device's path (UART capture, capabilities). Needs thub-common 2.2.0.
+
 ## 1.1.18 — 2026-10-13
 
 ### Added

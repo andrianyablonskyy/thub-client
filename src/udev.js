@@ -17,7 +17,7 @@
 const fs = require('node:fs'),
   path = require('node:path'),
   { execFileSync } = require('node:child_process'),
-  { parseUdevFilter, udevFilterOf, LIST_KINDS } = require('@andrian.yablonskyy/thub-common');
+  { splitUdevFilter, udevFilterOf, LIST_KINDS } = require('@andrian.yablonskyy/thub-common');
 
 const RULES_DIR = '/etc/udev/rules.d',
   SETTLE_TIMEOUT_SEC = 10,
@@ -44,7 +44,8 @@ function symlinkOf(field, devicePath){
 }
 
 // One rule per hw-devices entry with a udev filter (README §8.6): its own
-// `udev`, or the filter of an older entry's devpath and ids. The filter is
+// `udev`, or the filter of an older entry's devpath and ids; its symlink is
+// the filter's SYMLINK+="…" if it has one, else the entry's path. The filter is
 // checked again here, as this file is installed as root. Entries without
 // one are left to whatever already provides their `path` (a manual rule, or
 // a plain /dev node), so they get no rule here.
@@ -57,14 +58,15 @@ function ruleLines(hw){
         return;
       }
       const field = `hw-devices.${list}[${i}]`;
-      let match;
+      let parts;
       try {
-        match = parseUdevFilter(filter);
+        parts = splitUdevFilter(filter);
       }
       catch (err){
         throw new Error(`${field}.udev: ${err.message}`);
       }
-      lines.push(`${match}, SYMLINK+="${symlinkOf(field, entry.path)}"`);
+      // The filter's own SYMLINK+="…" overrides thub/dut<index>-<kind>.
+      lines.push(`${parts.match}, SYMLINK+="${parts.symlink ?? symlinkOf(field, entry.path)}"`);
     });
   }
   if (hw.usbPower?.ports?.length){

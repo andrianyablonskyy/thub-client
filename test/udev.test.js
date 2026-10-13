@@ -102,3 +102,16 @@ test('storages: a mass storage device (an ST-Link\'s drive) gets /dev/thub/dut<i
     'SUBSYSTEM=="block", ENV{DEVTYPE}=="disk", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="374e", ATTRS{devpath}=="1.3", SYMLINK+="thub/dut1-storage"'
   ]);
 });
+
+test('a filter with its own SYMLINK+="…": the rule makes that link instead, and the Client uses /dev/<link>', () => {
+  const cfg = deviceConfig({
+    uarts: [{ index: 1, udev: 'SUBSYSTEM=="tty", ATTRS{serial}=="A9XYZ", SYMLINK+="lab/nucleo-console"' }],
+    stlinks: [{ index: 1, udev: 'SUBSYSTEM=="usb", ATTRS{idProduct}=="374e"' }]
+  });
+  assert.deepEqual([cfg.hw.uarts[0].path, cfg.hw.stlinks[0].path], ['/dev/lab/nucleo-console', '/dev/thub/dut1-stlink']);
+  assert.deepEqual(rules(cfg), [
+    'SUBSYSTEM=="usb", ATTRS{idProduct}=="374e", SYMLINK+="thub/dut1-stlink"',
+    'SUBSYSTEM=="tty", ATTRS{serial}=="A9XYZ", SYMLINK+="lab/nucleo-console"'
+  ]);
+  assert.throws(() => deviceConfig({ uarts: [{ index: 1, udev: 'SUBSYSTEM=="tty", SYMLINK+="../sda"' }] }), /must be a path inside \/dev/);
+});

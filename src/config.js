@@ -15,7 +15,7 @@
 
 const fs = require('node:fs'),
   {
-    validateClientConfig, shareableClientConfigFile, importClientConfigFile, hwDevicesOf, HW_DEVICES_SECTION, LIST_KINDS
+    validateClientConfig, shareableClientConfigFile, importClientConfigFile, hwDevicesOf, HW_DEVICES_SECTION, LIST_KINDS, splitUdevFilter
   } = require('@andrian.yablonskyy/thub-common'),
   os = require('node:os'),
   path = require('node:path'),
@@ -219,6 +219,12 @@ function resolveDeviceList(field, list, kind){
     const item = typeof entry === 'number' ? { index: entry } : typeof entry === 'string' ? { path: entry } : entry;
     if (!item || typeof item !== 'object'){
       throw new Error(`${field}[${i}] must be an index, a path or an object`);
+    }
+    // A udev filter with its own SYMLINK+="…" names the device itself (and
+    // wins over an explicit path): /dev/<symlink>.
+    const own = item.udev ? splitUdevFilter(item.udev).symlink : null;
+    if (own !== null){
+      return { ...item, path: `/dev/${own}` };
     }
     if (item.path || (kind === 'stlink' && item.serial && item.index === undefined)){
       return item;
