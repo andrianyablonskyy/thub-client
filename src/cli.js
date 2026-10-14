@@ -21,7 +21,7 @@ const fs = require('node:fs'),
   { spawn, spawnSync } = require('node:child_process'),
   { Command } = require('commander'),
   { loadConfig, loadDeviceConfig } = require('./config'),
-  { renderRules, syncUdevRules } = require('./udev'),
+  { renderRules, syncUdevRules, mayWriteRules } = require('./udev'),
   { sendCommand } = require('./control-socket'),
   { register, deregister } = require('./instances'),
   {
@@ -235,20 +235,27 @@ program
 // a config change without a restart, or previewing the generated rules.
 program
   .command('udev')
-  .description('Install this instance\'s udev rules from its hw.* config (needs root), or print them')
+  .description('Install the HW Client\'s udev rules (/etc/udev/rules.d/99-thub-client-hw.rules) from its hw.* config (needs root), or print them')
   .option('--print', 'Only print the rules the config would generate', false)
-  .action((opts) => runOrExit(() => {
+  .action(async (opts) => {
     const cfg = loadDeviceConfig(program.opts().config);
     if (opts.print){
       process.stdout.write(renderRules(cfg) || '# no hw.* entries with a devpath — no rules\n');
       return;
     }
-    const { status, file } = syncUdevRules(cfg);
-    if (status === 'needs-root'){
-      throw new Error(`${file} needs updating — run this as root (sudo)`);
-    }
-    console.log(status === 'skipped' ? 'udev: not Linux — nothing to do' : `udev: ${file} ${status}`);
-  }));
+    // The machine's one rule file is the running HW Client's.
+    const may = await mayWriteRules(cfg);
+    runOrExit(() => {
+      if (!may.ok){
+        throw new Error(`not applied: ${may.reason}`);
+      }
+      const { status, file } = syncUdevRules(cfg);
+      if (status === 'needs-root'){
+        throw new Error(`${file} needs updating — run this as root (sudo)`);
+      }
+      console.log(status === 'skipped' ? 'udev: not Linux — nothing to do' : `udev: ${file} ${status}`);
+    });
+  });
 
 // Manual update (README §10.2); the Coordinator-initiated one goes
 // through thub-client-update.service instead.

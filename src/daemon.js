@@ -26,6 +26,7 @@ const fs = require('node:fs'),
   { JobRunner } = require('./runner'),
   { describeCapabilities } = require('./capabilities'),
   { syncUdevRules } = require('./udev'),
+  { acquireHwLock, EXIT_HW_LOCKED } = require('./hw-lock'),
   { RebootScheduler } = require('./reboot-schedule'),
   { scanUsb } = require('./usb-scan'),
   { probeStlinks } = require('./stlink-probe'),
@@ -102,6 +103,16 @@ class Daemon{
   // send SIGTERM and wait for the process to exit, so this has to be a
   // real, awaited shutdown rather than a fire-and-forget flag flip.
   async start(){
+    // One HW Client per machine: it owns the machine's udev rules (and the
+    // devices they name). A second one stops here, before touching them.
+    if (this.config.type === 'hw'){
+      try {
+        this.hwLock = await acquireHwLock(this.config.instance);
+      }
+      catch (err){
+        throw err.code === 'EHWLOCKED' ? Object.assign(err, { exitCode: EXIT_HW_LOCKED }) : err;
+      }
+    }
     this._syncUdevRules();
     this.reboot.load();
     await this._ensureRegistered();
@@ -116,13 +127,19 @@ class Daemon{
 
   // Under systemd the unit's ExecStartPre=+ has already done this as root
   // (so this finds it unchanged); run by hand as root, this is what does
-  // it. Before registering, so capabilities see the fresh symlinks. Never
-  // fatal: a wrong rule just shows up as missing devices on the dashboard.
+  // it — including removing the rules once the config has no devices.
+  // Before registering, so capabilities see the fresh symlinks. Only an HW
+  // Client, which holds the machine's lock by now. Never fatal: a wrong
+  // rule just shows up as missing devices on the dashboard.
   _syncUdevRules(){
+    if (this.config.type !== 'hw'){
+      return;
+    }
     try {
       const { status, file } = syncUdevRules(this.config);
       if (status === 'needs-root'){
-        console.warn(`udev: ${file} does not match this config; apply it with: sudo thub-client --config ${this.config.configPath} udev`);
+        console.warn(`udev: ${file} does not match this config, and this Client doesn't run as root (nor under systemd, whose ` +
+          `unit applies it at each start). Apply it with: sudo thub-client --config ${this.config.configPath} udev`);
       }
     }
     catch (err){
@@ -136,6 +153,7 @@ class Daemon{
   }
 
   _cleanup(){
+    this.hwLock?.release();
     this.reboot.stop();
     this.controlServer?.close();
     fs.rmSync(this.config.pidFile, { force: true });
@@ -726,7 +744,8 @@ if (require.main === module){
     .then(() => process.exit(0))
     .catch((err) => {
       console.error('Fatal:', err.message);
-      process.exit(1);
+      // EXIT_HW_LOCKED: systemd's RestartPreventExitStatus, no restart loop.
+      process.exit(err.exitCode || 1);
     });
   process.on('SIGTERM', () => daemon.stop());
   process.on('SIGINT', () => daemon.stop());

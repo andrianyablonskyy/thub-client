@@ -56,6 +56,38 @@ function isConfigured(raw, paths, name){
   return Boolean(raw.joinKey) || fs.existsSync(raw.tokenFile || path.join(paths.varDir, `${name}.token`));
 }
 
+// Instances (config files) of this user other than `name` that are HW
+// Clients with their systemd unit enabled: they'd hold the machine's one
+// HW slot (hw-lock.js).
+function otherHwInstances(name, paths){
+  let files = [];
+  try {
+    files = fs.readdirSync(paths.configDir).filter((f) => f.endsWith('.json'));
+  }
+  catch {
+    return [];
+  }
+  return files.map((f) => f.slice(0, -'.json'.length))
+    .filter((other) => other !== name && NAME_RE.test(other))
+    .filter((other) => {
+      try {
+        return readConfig(path.join(paths.configDir, `${other}.json`)).type === 'hw';
+      }
+      catch {
+        return false;
+      }
+    })
+    .filter((other) => {
+      try {
+        execFileSync('systemctl', ['is-enabled', '--quiet', `thub-client@${other}.service`], { stdio: 'ignore' });
+        return true;
+      }
+      catch {
+        return false;
+      }
+    });
+}
+
 // A new instance starts from client.json (coordinatorUrl, joinKey, varDir,
 // hw-devices, ...) with the requested type — an SW one without hw-devices;
 // `name` is dropped, so it registers under the instance name (the config
@@ -70,6 +102,14 @@ function register(name, type){
     delete raw.name;
     if (type === 'sw'){
       delete raw['hw-devices'];
+    }
+  }
+  // One HW Client per machine: it owns the udev rules and the devices.
+  if (type === 'hw' && process.platform === 'linux'){
+    const others = otherHwInstances(name, paths);
+    if (others.length){
+      throw new Error(`only one HW Client may run on this machine, and thub-client@${others[0]} is one. ` +
+        `Deregister it first (thub-client deregister --name ${others[0]}), or register this one with --type sw`);
     }
   }
   raw.type = type;
@@ -111,4 +151,4 @@ function deregister(name){
   console.log(`Deregistered ${unit}.`);
 }
 
-module.exports = { register, deregister };
+module.exports = { register, deregister, otherHwInstances };

@@ -12,9 +12,12 @@ Wants=network-online.target
 # that file's `name` — "dut0" when it has none. Nothing on the command line
 # overrides it, so a restart (e.g. after a config applied from the
 # dashboard) always comes back with the file's name.
-# ExecStartPre's "+" runs it as root, outside the sandbox below: it writes
-# /etc/udev/rules.d/99-thub-%i.rules from the config's hw.* entries and
+# ExecStartPre's "+" runs it as root, outside the sandbox below: for an HW
+# Client it writes /etc/udev/rules.d/99-thub-client-hw.rules from the
+# config's hw-devices entries — or removes it when there are none — and
 # reloads udev, so the /dev/thub/* symlinks exist before the daemon starts.
+# One HW Client per machine: a second one exits with 78 (it found the first
+# running), which RestartPreventExitStatus keeps from restarting in a loop.
 [Service]
 Type=simple
 User=thub
@@ -29,6 +32,7 @@ ExecStartPre=+/usr/bin/node /usr/lib/node_modules/@andrian.yablonskyy/thub-clien
 ExecStart=/usr/bin/node /usr/lib/node_modules/@andrian.yablonskyy/thub-client/src/daemon.js --config /home/thub/.config/thub/%i.json
 Restart=always
 RestartSec=2
+RestartPreventExitStatus=78
 NoNewPrivileges=yes
 ProtectSystem=strict
 PrivateTmp=yes
