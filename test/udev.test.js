@@ -115,3 +115,20 @@ test('a filter with its own SYMLINK+="…": the rule makes that link instead, an
   ]);
   assert.throws(() => deviceConfig({ uarts: [{ index: 1, udev: 'SUBSYSTEM=="tty", SYMLINK+="../sda"' }] }), /must be a path inside \/dev/);
 });
+
+test('a full rule: MODE/GROUP/OWNER/TAG+= reach the rule file, so the service user (plugdev) can open the device', () => {
+  const cfg = deviceConfig({
+    stlinks: [{
+      index: 3,
+      udev: 'SUBSYSTEM=="usb", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="3748", ATTR{devpath}=="1.1.2", ' +
+        'MODE="0664", GROUP="plugdev", SYMLINK+="thub/f103-stlink"'
+    }],
+    usbs: [{ index: 1, udev: 'SUBSYSTEM=="usb", ATTR{devpath}=="1.2", TAG+="uaccess"' }]
+  });
+  assert.equal(cfg.hw.stlinks[0].path, '/dev/thub/f103-stlink');
+  assert.deepEqual(rules(cfg), [
+    'SUBSYSTEM=="usb", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="3748", ATTR{devpath}=="1.1.2", MODE="0664", GROUP="plugdev", SYMLINK+="thub/f103-stlink"',
+    'SUBSYSTEM=="usb", ATTR{devpath}=="1.2", TAG+="uaccess", SYMLINK+="thub/dut1-usb"'
+  ]);
+  assert.throws(() => deviceConfig({ stlinks: [{ index: 1, udev: 'SUBSYSTEM=="usb", MODE="0664", RUN+="/bin/sh"' }] }), /isn't a udev match/);
+});

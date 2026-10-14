@@ -28,6 +28,7 @@ const fs = require('node:fs'),
   { syncUdevRules } = require('./udev'),
   { RebootScheduler } = require('./reboot-schedule'),
   { scanUsb } = require('./usb-scan'),
+  { probeStlinks } = require('./stlink-probe'),
   { UsbPower } = require('./usb-power'),
   { readHold } = require('./host-hold'),
   { PACKAGES, isNewer } = require('@andrian.yablonskyy/thub-common'),
@@ -439,6 +440,10 @@ class Daemon{
       else if (command.command === 'scan-usb'){
         this._scanUsb(command.requestId);
       }
+      // "ST-Link probes" Refresh: st-info --probe, answered the same way.
+      else if (command.command === 'probe-stlink'){
+        this._probeStlinks(command.requestId);
+      }
       // `thub power` by the running job's owner (README §8.7). Not awaited:
       // a reset's delay mustn't hold up the next command (a cancel).
       else if (command.command === 'power' && command.jobId === this.activeJobId && this.runner){
@@ -482,6 +487,17 @@ class Daemon{
     }
     catch (err){
       console.error(`USB scan: couldn't send the result: ${err.message}`);
+    }
+  }
+
+  async _probeStlinks(requestId){
+    const { output, error } = await probeStlinks();
+    try {
+      await this.client.post(`/resources/${this.resourceId}/stlink-probe`, { requestId, output, error });
+      console.log(`ST-Link probe sent${error ? ` (${error})` : ''}`);
+    }
+    catch (err){
+      console.error(`ST-Link probe: couldn't send the result: ${err.message}`);
     }
   }
 

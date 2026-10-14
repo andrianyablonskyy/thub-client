@@ -44,7 +44,8 @@ function symlinkOf(field, devicePath){
 }
 
 // One rule per hw-devices entry with a udev filter (README §8.6): its own
-// `udev`, or the filter of an older entry's devpath and ids; its symlink is
+// `udev` (matches, and maybe MODE/GROUP/OWNER/TAG+= for the device node's
+// access), or the filter of an older entry's devpath and ids; its symlink is
 // the filter's SYMLINK+="…" if it has one, else the entry's path. The filter is
 // checked again here, as this file is installed as root. Entries without
 // one are left to whatever already provides their `path` (a manual rule, or
@@ -65,8 +66,9 @@ function ruleLines(hw){
       catch (err){
         throw new Error(`${field}.udev: ${err.message}`);
       }
-      // The filter's own SYMLINK+="…" overrides thub/dut<index>-<kind>.
-      lines.push(`${parts.match}, SYMLINK+="${parts.symlink ?? symlinkOf(field, entry.path)}"`);
+      // Its access assignments (MODE, GROUP, …) as given; its own
+      // SYMLINK+="…" overrides thub/dut<index>-<kind>.
+      lines.push(`${parts.match}, ${parts.assign ? `${parts.assign}, ` : ''}SYMLINK+="${parts.symlink ?? symlinkOf(field, entry.path)}"`);
     });
   }
   if (hw.usbPower?.ports?.length){
