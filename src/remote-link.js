@@ -136,7 +136,14 @@ class RemoteLink{
         index: i + 1, label: name(s.path, `stlink${i + 1}`), serial: s.serial || null, target: s.openocdTarget || null
       })),
       serial: this.uartHub?.available ?? false,
-      camera: this.camera ? { name: this.camera.name, codec: 'h264', container: 'mpegts' } : null
+      // Whether it streams right now, and why not — sent again whenever that
+      // changes, so thub connect shows it without a viewer.
+      camera: this.camera
+        ? {
+          name: this.camera.name, codec: 'h264', container: 'mpegts',
+          streaming: Boolean(this.video?.streaming), error: this.video?.error || null
+        }
+        : null
     };
   }
 
@@ -155,7 +162,8 @@ class RemoteLink{
           }
         }
       },
-      onNote: (text) => this.viewers.forEach((ch) => this._note(ch, text))
+      onNote: (text) => this.viewers.forEach((ch) => this._note(ch, text)),
+      onState: () => this._send({ t: 'devices', ...this.devices() })
     });
     this.video = stream;
     stream.start().catch((err) => this.log.error?.(`camera: ${err.message}`));
@@ -196,14 +204,18 @@ class RemoteLink{
     });
     ws.on('ping', alive);
     ws.on('message', (data, isBinary) => (isBinary ? this._onData(data) : this._onControl(parseControl(data))));
+    let refused = false;
     ws.on('unexpected-response', (req, res) => {
       const status = res.statusCode,
         proxy = status === 426 || (status >= 300 && status < 400);
+      refused = true;
       this.log.error?.(`remote access: the Coordinator refused the link (HTTP ${status})` +
         (proxy ? ' — a reverse proxy in front of it isn\'t passing WebSocket upgrades on to it' : ''));
       ws.terminate();
     });
-    ws.on('error', (err) => this.log.error?.(`remote access: ${err.message}`));
+    // After a refusal, terminate() adds "closed before the connection was
+    // established": already said.
+    ws.on('error', (err) => !refused && this.log.error?.(`remote access: ${err.message}`));
     ws.on('close', (code) => {
       clearTimeout(this.pingTimer);
       if (this.ws !== ws){

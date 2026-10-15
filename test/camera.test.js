@@ -87,19 +87,46 @@ test('the stream: every UDP packet reaches onData; a stopped ffmpeg is started a
       sock.send(Buffer.from(`ts-packet-${runs.length}`), port, '127.0.0.1', () => sock.close());
       return proc;
     },
+    states = [],
+    logged = [],
     stream = new CameraStream({ path: '/dev/video0', name: 'C920' }, {
-      spawn, onData: (b) => got.push(String(b)), onNote: (t) => notes.push(t), log: {}
+      spawn, onData: (b) => got.push(String(b)), onNote: (t) => notes.push(t), onState: (s) => states.push(s),
+      log: { log: (m) => logged.push(m), error: (m) => logged.push(m) }
     });
   await stream.start();
   for (let i = 0; i < 100 && !got.length; i++){
     await new Promise((r) => setTimeout(r, 10));
   }
   assert.deepEqual(got, ['ts-packet-1']);
+  assert.deepEqual(states, [{ streaming: true, error: null }]);
 
   runs[0].proc.stderr.emit('data', '/dev/video0: Device or resource busy\n');
   runs[0].proc.exitCode = 1;
-  runs[0].proc.emit('exit', 1);
+  runs[0].proc.emit('close', 1);
   assert.match(notes[0], /ffmpeg stopped \(1\): \/dev\/video0: Device or resource busy — trying again in \d s/);
+  assert.equal(states.at(-1).streaming, false);
+  // The journal says so too: started, streaming, stopped.
+  const journal = logged.join('\n');
+  assert.match(journal, /camera: starting ffmpeg .*-i \/dev\/video0/);
+  assert.match(journal, /camera: streaming \/dev\/video0 \(C920\)[\s\S]*camera: ffmpeg stopped \(1\)/);
   stream.stop();
   assert.equal(runs.length, 1); // stopped before its retry
+});
+
+test('no ffmpeg on the host: said at once — to the Agent, the viewers and the journal — and tried again later', async () => {
+  const states = [],
+    notes = [],
+    logged = [],
+    stream = new CameraStream({ path: '/dev/video0', name: 'C920' }, {
+      ffmpeg: 'thub-test-no-such-ffmpeg', onData: () => {}, onNote: (t) => notes.push(t), onState: (s) => states.push(s),
+      log: { log: () => {}, error: (m) => logged.push(m) }
+    });
+  await stream.start();
+  for (let i = 0; i < 100 && !states.length; i++){
+    await new Promise((r) => setTimeout(r, 10));
+  }
+  stream.stop();
+  assert.deepEqual(states, [{ streaming: false, error: 'thub-test-no-such-ffmpeg isn\'t installed on this Client host (on Ubuntu: sudo apt install ffmpeg)' }]);
+  assert.match(notes[0], /isn't installed on this Client host .* — trying again in \d s/);
+  assert.match(logged[0], /^camera: thub-test-no-such-ffmpeg isn't installed/);
 });

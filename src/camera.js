@@ -78,16 +78,28 @@ function ffmpegArgs(device, port){
 // The stream for one reservation: started with it, stopped with it, and
 // started again (1 s, 2 s … 30 s apart) if ffmpeg stops — a camera
 // unplugged and plugged back, say. `onData(datagram)`: every UDP packet;
-// `onNote(text)`: what to tell the viewers.
+// `onNote(text)`: what to tell the viewers; `onState({ streaming, error })`:
+// whenever that changes (the Agent shows it at once). All of it is logged
+// too, so the Client's journal says why a stream isn't there.
 class CameraStream{
-  constructor(camera, { onData, onNote = () => {}, spawn = spawnProcess, ffmpeg = 'ffmpeg', log = console }){
-    Object.assign(this, { camera, onData, onNote, spawn, ffmpeg, log });
+  constructor(camera, { onData, onNote = () => {}, onState = () => {}, spawn = spawnProcess, ffmpeg = 'ffmpeg', log = console }){
+    Object.assign(this, { camera, onData, onNote, onState, spawn, ffmpeg, log });
     this.running = false;
+    this.streaming = false; // packets are coming
     this.proc = null;
     this.sock = null;
     this.attempt = 0;
     this.timer = null;
     this.error = null; // why it isn't streaming, if it isn't
+  }
+
+  _setState(streaming, error){
+    if (streaming === this.streaming && error === this.error){
+      return;
+    }
+    this.streaming = streaming;
+    this.error = error;
+    this.onState({ streaming, error });
   }
 
   async start(){
@@ -97,8 +109,11 @@ class CameraStream{
     this.running = true;
     this.sock = dgram.createSocket('udp4');
     this.sock.on('message', (buf) => {
-      this.attempt = 0;
-      this.error = null;
+      if (!this.streaming){
+        this.log.log?.(`camera: streaming ${this.camera.path} (${this.camera.name})`);
+        this.attempt = 0;
+        this._setState(true, null);
+      }
       this.onData(buf);
     });
     this.sock.on('error', (err) => this.log.error?.(`camera: ${err.message}`));
@@ -111,29 +126,45 @@ class CameraStream{
       return;
     }
     const port = this.sock.address().port,
-      proc = this.spawn(this.ffmpeg, ffmpegArgs(this.camera.path, port), { stdio: ['ignore', 'ignore', 'pipe'] }),
+      args = ffmpegArgs(this.camera.path, port),
       tail = [];
+    let spawnError = null,
+      proc;
+    this.log.log?.(`camera: starting ${this.ffmpeg} ${args.join(' ')}`);
+    try {
+      proc = this.spawn(this.ffmpeg, args, { stdio: ['ignore', 'ignore', 'pipe'] });
+    }
+    catch (err){
+      return this._failed(`ffmpeg: ${err.message}`);
+    }
     this.proc = proc;
     proc.stderr?.on('data', (d) => {
       tail.push(...String(d).split('\n').filter(Boolean));
       tail.splice(0, Math.max(0, tail.length - 3));
     });
     proc.on('error', (err) => {
-      this.error = err.code === 'ENOENT'
-        ? 'ffmpeg isn\'t installed on this Client host (on Ubuntu: sudo apt install ffmpeg)'
+      spawnError = err.code === 'ENOENT'
+        ? `${this.ffmpeg} isn't installed on this Client host (on Ubuntu: sudo apt install ffmpeg)`
         : `ffmpeg: ${err.message}`;
     });
-    proc.on('exit', (code) => {
+    // 'close', not 'exit': a binary that isn't there gets only 'error' and 'close'.
+    proc.on('close', (code) => {
       if (this.proc !== proc || !this.running){
         return;
       }
       this.proc = null;
-      this.error ??= `ffmpeg stopped (${code}): ${tail.join(' | ') || 'no output'}`;
-      const retry = backoffMs(this.attempt++);
-      this.onNote(`${this.error} — trying again in ${Math.round(retry / 1000)} s`);
-      this.timer = setTimeout(() => this._run(), retry);
-      this.timer.unref?.();
+      this._failed(spawnError || `ffmpeg stopped (${code}): ${tail.join(' | ') || 'no output'}`);
     });
+  }
+
+  _failed(error){
+    this._setState(false, error);
+    const retry = backoffMs(this.attempt++),
+      text = `${error} — trying again in ${Math.round(retry / 1000)} s`;
+    this.log.error?.(`camera: ${text}`);
+    this.onNote(text);
+    this.timer = setTimeout(() => this._run(), retry);
+    this.timer.unref?.();
   }
 
   stop(){
