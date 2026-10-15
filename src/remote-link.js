@@ -197,7 +197,10 @@ class RemoteLink{
     ws.on('ping', alive);
     ws.on('message', (data, isBinary) => (isBinary ? this._onData(data) : this._onControl(parseControl(data))));
     ws.on('unexpected-response', (req, res) => {
-      this.log.error?.(`remote access: the Coordinator refused the link (HTTP ${res.statusCode})`);
+      const status = res.statusCode,
+        proxy = status === 426 || (status >= 300 && status < 400);
+      this.log.error?.(`remote access: the Coordinator refused the link (HTTP ${status})` +
+        (proxy ? ' — a reverse proxy in front of it isn\'t passing WebSocket upgrades on to it' : ''));
       ws.terminate();
     });
     ws.on('error', (err) => this.log.error?.(`remote access: ${err.message}`));
