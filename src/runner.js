@@ -30,7 +30,8 @@ const KILL_GRACE_MS = 10_000;
 class JobRunner{
   // `usbPower`: the daemon's UsbPower (one per Client, so requests never
   // overlap); a new one from the config when not given.
-  constructor(client, config, { usbPower } = {}){
+  constructor(client, config, { usbPower, uartHub = null } = {}){
+    this.uartHub = uartHub;
     this.client = client;
     this.config = config;
     this.usbPower = usbPower || new UsbPower(config.hw?.usbPower?.ports);
@@ -95,7 +96,7 @@ class JobRunner{
 
     const executor =
       job.spec.target.type === 'hw'
-        ? new HwExecutor(this.config, logShipper)
+        ? new HwExecutor(this.config, logShipper, { uartHub: this.uartHub })
         : new SwExecutor(this.config, logShipper);
 
     try {

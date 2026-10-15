@@ -20,7 +20,8 @@
   },
   "dependencies": {
     "@andrian.yablonskyy/thub-common": "^2.2.2",
-    "commander": "^13.1.0"
+    "commander": "^13.1.0",
+    "ws": "8.21.3"
   },
   "optionalDependencies": {
     "serialport": "^13.0.0"

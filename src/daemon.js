@@ -31,6 +31,8 @@ const fs = require('node:fs'),
   { scanUsb } = require('./usb-scan'),
   { probeStlinks } = require('./stlink-probe'),
   { UsbPower } = require('./usb-power'),
+  { UartHub } = require('./uart-hub'),
+  { RemoteLink } = require('./remote-link'),
   { readHold } = require('./host-hold'),
   { PACKAGES, isNewer } = require('@andrian.yablonskyy/thub-common'),
   { version } = require('../package.json');
@@ -85,6 +87,18 @@ class Daemon{
     this.configState = readAppliedConfigRevision(config.configRevisionFile);
     this.restartForConfig = false;
     this.usbPower = usbPowerOf(config);
+    // An HW Client's UARTs, shared by a job's capture and the developer's
+    // remote session while the runner is reserved (README §5.6) — the link
+    // to the Coordinator that serves that session is up only then.
+    if (config.type === 'hw'){
+      this.uartHub = new UartHub();
+      this.remote = new RemoteLink({
+        auth: () => ({ baseUrl: this.config.coordinatorUrl, token: this.client?.token, resourceId: this.resourceId }),
+        hw: config.hw,
+        uartHub: this.uartHub,
+        userAgent: `thub-client/${version}`
+      });
+    }
     this.reboot = new RebootScheduler({
       scheduleFile: config.rebootScheduleFile,
       requestFile: config.rebootRequestFile,
@@ -153,6 +167,7 @@ class Daemon{
   }
 
   _cleanup(){
+    this.remote?.stop();
     this.hwLock?.release();
     this.reboot.stop();
     this.controlServer?.close();
@@ -388,7 +403,7 @@ class Daemon{
   }
 
   async _heartbeat(){
-    const { commands, heartbeatIntervalSec } = await this.client.post(`/resources/${this.resourceId}/heartbeat`, {
+    const { commands, heartbeatIntervalSec, remoteAccess } = await this.client.post(`/resources/${this.resourceId}/heartbeat`, {
       state: this.activeJobId || this.localLock.locked || this.updateHold ? 'busy' : 'idle',
       activeJobId: this.activeJobId,
       localLock: this.localLock.locked || this.updateHold,
@@ -413,6 +428,8 @@ class Daemon{
     });
 
     this._adoptHeartbeatInterval(heartbeatIntervalSec);
+    // Reserved: keep the remote access link up (an older Coordinator never says so).
+    this.remote?.setEnabled(remoteAccess === true);
     await this._handleCommands(commands || []);
     await this._restartForConfigIfIdle();
   }
@@ -668,7 +685,7 @@ class Daemon{
     console.log(`Job ${job.id} queued`);
     this.activeJobId = job.id;
     this._touchActivity();
-    this.runner = new JobRunner(this.client, this.config, { usbPower: this.usbPower });
+    this.runner = new JobRunner(this.client, this.config, { usbPower: this.usbPower, uartHub: this.uartHub });
     this._pollCommands(job.id);
     try {
       await this.runner.run(job);
