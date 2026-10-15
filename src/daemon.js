@@ -403,7 +403,7 @@ class Daemon{
   }
 
   async _heartbeat(){
-    const { commands, heartbeatIntervalSec, remoteAccess } = await this.client.post(`/resources/${this.resourceId}/heartbeat`, {
+    const { commands, heartbeatIntervalSec, remoteSession } = await this.client.post(`/resources/${this.resourceId}/heartbeat`, {
       state: this.activeJobId || this.localLock.locked || this.updateHold ? 'busy' : 'idle',
       activeJobId: this.activeJobId,
       localLock: this.localLock.locked || this.updateHold,
@@ -428,8 +428,9 @@ class Daemon{
     });
 
     this._adoptHeartbeatInterval(heartbeatIntervalSec);
-    // Reserved: keep the remote access link up (an older Coordinator never says so).
-    this.remote?.setEnabled(remoteAccess === true);
+    // Reserved: keep the remote access link up, for that reservation (an
+    // older Coordinator never says so).
+    this.remote?.setSession(typeof remoteSession === 'string' ? remoteSession : null);
     await this._handleCommands(commands || []);
     await this._restartForConfigIfIdle();
   }

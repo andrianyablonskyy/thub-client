@@ -75,6 +75,7 @@ class RemoteLink{
   }){
     Object.assign(this, { auth, hw: hw || {}, uartHub, userAgent, log, WebSocket, spawn, openocd, serialOf });
     this.enabled = false;
+    this.session = null; // the reservation's id: its link's path
     this.ws = null;
     this.attempt = 0;
     this.retryTimer = null;
@@ -82,24 +83,26 @@ class RemoteLink{
     this.channels = new Map();
   }
 
-  // From each heartbeat reply: up while the runner is reserved.
-  setEnabled(on){
-    on = Boolean(on);
-    if (on === this.enabled){
+  // From each heartbeat reply: the reservation's id while the runner is
+  // reserved (its link is on that reservation's own path), else null. A
+  // new reservation means a new link: the old one's channels close.
+  setSession(id){
+    id = id || null;
+    if (id === this.session){
       return;
     }
-    this.enabled = on;
-    if (on){
+    this.stop();
+    if (id){
+      this.session = id;
+      this.enabled = true;
       this.attempt = 0;
       this._connect();
-    }
-    else {
-      this.stop();
     }
   }
 
   stop(){
     this.enabled = false;
+    this.session = null;
     clearTimeout(this.retryTimer);
     clearTimeout(this.pingTimer);
     this._closeAll('the reservation ended');
@@ -128,7 +131,7 @@ class RemoteLink{
       return;
     }
     const { baseUrl, token, resourceId } = this.auth(),
-      ws = new this.WebSocket(remoteUrl(baseUrl, `/resources/${resourceId}/remote-link`), {
+      ws = new this.WebSocket(remoteUrl(baseUrl, `/resources/${resourceId}/remote-link/${this.session}`), {
         headers: { Authorization: `Bearer ${token}`, ...(this.userAgent ? { 'User-Agent': this.userAgent } : {}) },
         handshakeTimeout: 15_000
       });
