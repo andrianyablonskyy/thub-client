@@ -2,10 +2,37 @@
 
 What changed in each release, newest first. `## Unreleased` collects the changes since the version on npm; `bin/publish` turns that heading into the version and date it releases.
 
-## 1.1.24 — 2026-10-15
+## 1.1.26 — 2026-10-15
+
+### Fixed
+
+- **A camera stream whose ffmpeg can't start is retried, and says why.** When `ffmpeg` wasn't installed, Node never reported the process as exited, so the stream was never retried and nothing was logged. The Client now waits for `close`, which comes in every case, and starts ffmpeg again 1 s, 2 s … 30 s later.
+- The journal now has a `camera:` line for each step: `starting ffmpeg …` with its full command, `streaming /dev/videoN (…)` once packets arrive, and each failure with its reason (*isn't installed*, *Permission denied*, *Device or resource busy*) and the retry delay.
+- The camera's state (streaming, or why not) is part of the device list sent to `thub connect`. It's sent again whenever the state changes, so the developer sees it without opening a viewer (Agent 1.1.22).
+- A refused remote access link no longer adds a second "WebSocket was closed before the connection was established" line to the journal.
+
+## 1.1.25 — 2026-10-15
 
 ### Changed
 
+- **Remote access behind a proxy:** when the Coordinator answers the link with a redirect or `426`, the journal says *a reverse proxy in front of it isn't passing WebSocket upgrades on to it*. The Client keeps retrying, so the link comes up once the proxy is fixed.
+
+## 1.1.24 — 2026-10-15
+
+### Added
+
+- **Remote access to a reserved board** (README §5.6). While its runner is reserved (the heartbeat reply's `remoteSession`), an HW Client holds a WebSocket link to the Coordinator, on that reservation's own path, and serves the developer's channels. It reconnects with backoff if the link drops, and stops at once when the reservation ends.
+  - **UARTs:** every UART in `hw-devices.uarts`. A port is opened once and shared, so a job capturing it and the developer's terminal both see the board. A port that disappears is reopened when it's back, and the developer is told.
+  - **SWD:** for each GDB connection, an **OpenOCD** of its own (`interface/stlink.cfg`, the probe by its serial from `serial` or its udev device, `target/<name>.cfg`, GDB on loopback, telnet and Tcl off). It stops when GDB disconnects, so jobs can flash in between. The target comes from `thub connect --target`, or else the probe's `openocdTarget`. Needs `openocd` on the host.
+- **Board camera** (README §5.7). An HW Client uses the host's first USB camera (the lowest `/dev/videoN` on a USB bus that is a capture node).
+  - **Label and capabilities:** it registers with the label **`video-stream`** and reports the camera in its capabilities.
+  - **Streaming:** while the runner is reserved, ffmpeg streams it as H.264 (`ultrafast`, `zerolatency`, at most 1280 wide, 2 Mbit/s, a keyframe a second) in MPEG-TS over loopback UDP, and the Client relays it to the developer's viewers. Video to a slow viewer is dropped, never queued ahead of the UARTs and GDB. Needs `ffmpeg` on the host.
+- The systemd unit also grants the **`video`** group, when the host has one. Re-run `sudo npm i -g @andrian.yablonskyy/thub-client` on an existing install.
+- New dependency: `ws` 8.21.3.
+
+### Changed
+
+- A job's UART capture goes through the shared port (above). Its log lines are the same as before.
 - Requires thub-common 2.2.3.
 
 ## 1.1.22 — 2026-10-14
