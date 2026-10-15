@@ -38,12 +38,12 @@ const fs = require('node:fs'),
   REBOOT_HELPER = path.join(__dirname, 'reboot-helper.js'),
   MANUAL_HINT = 'sudo npm i -g @andrian.yablonskyy/thub-client',
 
-  // Device access (serial adapters, ST-Link/USB probes) and, for SW
+  // Device access (serial adapters, ST-Link/USB probes, a USB camera) and, for SW
   // Clients, the Docker socket. Granted to the service only, without
   // changing the user's own group membership — and only the ones that
   // exist on this host, since systemd refuses to start a unit that names
   // an unknown group (e.g. `docker` on an HW-only box without Docker).
-  DEVICE_GROUPS = ['dialout', 'plugdev', 'docker'];
+  DEVICE_GROUPS = ['dialout', 'plugdev', 'video', 'docker'];
 
 function groupExists(name){
   try {

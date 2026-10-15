@@ -17,7 +17,9 @@
 const net = require('node:net'),
   path = require('node:path'),
   { spawn: spawnProcess, execFile } = require('node:child_process'),
-  { decodeData, dataMessages, parseControl, agentControl, remoteUrl, backoffMs, OPENOCD_TARGET_RE } = require('@andrian.yablonskyy/thub-common');
+  { CameraStream } = require('./camera'),
+  { decodeData, dataMessages, parseControl, agentControl, remoteUrl, backoffMs, OPENOCD_TARGET_RE, REMOTE_CLOSE
+  } = require('@andrian.yablonskyy/thub-common');
 
 // The Coordinator pings every 30 s; without one for this long the link is
 // taken for dead (a proxy or NAT dropped it silently) and reconnected.
@@ -28,7 +30,10 @@ const PING_TIMEOUT_MS = 75_000,
   OPENOCD_KILL_MS = 3_000,
   // A channel's sends waiting in the WebSocket: past this, its TCP side is
   // paused until they're out (a GDB download mustn't fill memory).
-  HIGH_WATER = 1024 * 1024;
+  HIGH_WATER = 1024 * 1024,
+  // Video is dropped, not queued, past this much waiting in the WebSocket:
+  // a slow viewer must never hold up the UARTs and GDB on the same link.
+  VIDEO_DROP = 2 * 1024 * 1024;
 
 // The probe's USB serial number from its udev device (ID_SERIAL_SHORT) —
 // what tells OpenOCD which ST-Link to open when the host has several.
@@ -70,10 +75,15 @@ function freePort(){
 class RemoteLink{
   // `auth()`: { baseUrl, token, resourceId } now (the token changes when
   // the Client registers again). `hw`: the Client's hw-devices config.
+  // `camera`: the host's USB camera (camera.js findUsbCamera), or null —
+  // streamed for as long as the runner is reserved (README §5.7).
   constructor({
-    auth, hw, uartHub, userAgent, log = console, WebSocket = require('ws'), spawn = spawnProcess, openocd = 'openocd', serialOf = udevSerial
+    auth, hw, uartHub, userAgent, log = console, WebSocket = require('ws'), spawn = spawnProcess, openocd = 'openocd', serialOf = udevSerial,
+    camera = null, cameraStream = (cam, opts) => new CameraStream(cam, opts)
   }){
-    Object.assign(this, { auth, hw: hw || {}, uartHub, userAgent, log, WebSocket, spawn, openocd, serialOf });
+    Object.assign(this, { auth, hw: hw || {}, uartHub, userAgent, log, WebSocket, spawn, openocd, serialOf, camera, cameraStream });
+    this.video = null; // the reservation's CameraStream
+    this.viewers = new Set(); // its video channels
     this.enabled = false;
     this.session = null; // the reservation's id: its link's path
     this.ws = null;
@@ -97,6 +107,7 @@ class RemoteLink{
       this.enabled = true;
       this.attempt = 0;
       this._connect();
+      this._startVideo();
     }
   }
 
@@ -106,6 +117,8 @@ class RemoteLink{
     clearTimeout(this.retryTimer);
     clearTimeout(this.pingTimer);
     this._closeAll('the reservation ended');
+    this.video?.stop();
+    this.video = null;
     const ws = this.ws;
     this.ws = null;
     ws?.close(1000, 'not reserved');
@@ -122,8 +135,42 @@ class RemoteLink{
       probes: (this.hw.stlinks || []).map((s, i) => ({
         index: i + 1, label: name(s.path, `stlink${i + 1}`), serial: s.serial || null, target: s.openocdTarget || null
       })),
-      serial: this.uartHub?.available ?? false
+      serial: this.uartHub?.available ?? false,
+      camera: this.camera ? { name: this.camera.name, codec: 'h264', container: 'mpegts' } : null
     };
+  }
+
+  // The camera starts streaming with the reservation, whether anyone
+  // watches yet or not; each viewer's channel gets every packet from then on.
+  _startVideo(){
+    if (!this.camera){
+      return;
+    }
+    const stream = this.cameraStream(this.camera, {
+      log: this.log,
+      onData: (buf) => {
+        if (this.ws && this.ws.bufferedAmount < VIDEO_DROP){
+          for (const ch of this.viewers){
+            this._sendData(ch, buf);
+          }
+        }
+      },
+      onNote: (text) => this.viewers.forEach((ch) => this._note(ch, text))
+    });
+    this.video = stream;
+    stream.start().catch((err) => this.log.error?.(`camera: ${err.message}`));
+  }
+
+  async _openVideo({ ch }){
+    if (!this.camera || !this.video){
+      throw new Error('this Client host has no USB camera');
+    }
+    this.viewers.add(ch);
+    this.channels.set(ch, { write: () => {}, close: () => this.viewers.delete(ch) });
+    this._send({ t: 'opened', ch, kind: 'video', name: this.camera.name });
+    if (this.video.error){
+      this._note(ch, this.video.error);
+    }
   }
 
   _connect(){
@@ -154,12 +201,17 @@ class RemoteLink{
       ws.terminate();
     });
     ws.on('error', (err) => this.log.error?.(`remote access: ${err.message}`));
-    ws.on('close', () => {
+    ws.on('close', (code) => {
       clearTimeout(this.pingTimer);
       if (this.ws !== ws){
         return;
       }
       this.ws = null;
+      // The reservation ended: everything stops now (the camera too), not
+      // at the next heartbeat — and there's nothing to reconnect to.
+      if (code === REMOTE_CLOSE.RESERVATION_ENDED){
+        return this.stop();
+      }
       this._closeAll('the link to the Coordinator dropped');
       if (this.enabled){
         clearTimeout(this.retryTimer);
@@ -196,7 +248,8 @@ class RemoteLink{
       return this._closeChannel(msg.ch, null, { tell: false });
     }
     this._closeChannel(msg.ch, null, { tell: false }); // a reused id: the old one is gone
-    (msg.kind === 'uart' ? this._openUart(msg) : this._openSwd(msg)).catch((err) => this._closeChannel(msg.ch, err.message));
+    const open = { uart: () => this._openUart(msg), swd: () => this._openSwd(msg), video: () => this._openVideo(msg) }[msg.kind];
+    open().catch((err) => this._closeChannel(msg.ch, err.message));
   }
 
   _onData(buf){

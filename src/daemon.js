@@ -33,6 +33,7 @@ const fs = require('node:fs'),
   { UsbPower } = require('./usb-power'),
   { UartHub } = require('./uart-hub'),
   { RemoteLink } = require('./remote-link'),
+  { findUsbCamera, registrationLabels } = require('./camera'),
   { readHold } = require('./host-hold'),
   { PACKAGES, isNewer } = require('@andrian.yablonskyy/thub-common'),
   { version } = require('../package.json');
@@ -92,7 +93,13 @@ class Daemon{
     // to the Coordinator that serves that session is up only then.
     if (config.type === 'hw'){
       this.uartHub = new UartHub();
+      // The host's first USB camera, streamed while reserved (README §5.7).
+      this.camera = findUsbCamera();
+      if (this.camera){
+        console.log(`USB camera: ${this.camera.name} (${this.camera.path}) — streamed while the runner is reserved`);
+      }
       this.remote = new RemoteLink({
+        camera: this.camera,
         auth: () => ({ baseUrl: this.config.coordinatorUrl, token: this.client?.token, resourceId: this.resourceId }),
         hw: config.hw,
         uartHub: this.uartHub,
@@ -209,7 +216,8 @@ class Daemon{
           clientId: this.config.clientId,
           name: this.config.name,
           type: this.config.type,
-          labels: this.config.labels,
+          // A USB camera adds its label, so its runners can be found.
+          labels: registrationLabels(this.config.labels, this.camera),
           groups: this.config.groups,
           // timeZone: a scheduled reboot's cron runs in it (README §10).
           hostInfo: {
@@ -218,7 +226,7 @@ class Daemon{
             addresses: localAddresses(),
             timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone
           },
-          capabilities: { ...describeCapabilities(this.config), rebootSupported: RebootScheduler.supported() },
+          capabilities: { ...describeCapabilities(this.config, { camera: this.camera }), rebootSupported: RebootScheduler.supported() },
           // Editable from the dashboard's Config tab (secrets left out),
           // and the whole file for its Export.
           config: this._editableConfig(),

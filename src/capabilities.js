@@ -24,8 +24,13 @@ function device(entry, extra = {}){
   return { path: entry.path || null, ...(entry.index ? { index: entry.index } : {}), ...extra, present: entry.path ? fs.existsSync(entry.path) : null };
 }
 
-function describeCapabilities(config, { run = execFileSync } = {}){
-  return { ...describeTyped(config, run), docker: describeDocker(run) };
+// `camera`: the host's USB camera, if it has one (camera.js), on an HW Client.
+function describeCapabilities(config, { run = execFileSync, camera = null } = {}){
+  const typed = describeTyped(config, run);
+  if (typed.hw){
+    typed.hw.camera = camera ? { path: camera.path, name: camera.name } : null;
+  }
+  return { ...typed, docker: describeDocker(run) };
 }
 
 // Whether a job's command can use Docker here — the `docker` CLI on the
