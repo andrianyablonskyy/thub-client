@@ -7,6 +7,7 @@ What changed in each release, newest first. `## Unreleased` collects the changes
 ### Added
 
 - **ST-Link RTT channels:** OpenOCD searches a configured target RAM range for the SEGGER control block and streams the selected up-channel to the Agent. RTT and SWD cannot use the same probe at once.
+- **Reserved-board service forwarding:** the Client can open an Agent-requested named TCP channel to a port on its own loopback interface, without exposing a new inbound port.
 
 ## 1.1.27 — 2026-10-15
 

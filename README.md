@@ -4,7 +4,7 @@ The Client (`thub-client`) component of TestHub — a self-hosted job network th
 
 Clients only make **outbound** connections to the [Coordinator](https://github.com/users/andrianyablonskyy/packages/container/package/thub-coordinator) — nothing in the lab needs to be exposed. The Coordinator runs from its Docker image; the `THUB_CLIENT_JOIN_KEY` it starts with is the `joinKey` in each Client's config:
 
-While a resource is reserved, its outbound remote-access link can carry service traffic requested by the reservation holder. The Client opens these connections to `127.0.0.1` and the selected port on the Client host; it does not bind or expose a new network port.
+While a resource is reserved, its outbound remote-access link can carry service traffic requested by the reservation holder. The Client opens these connections to `127.0.0.1` and the selected port on the Client host; it does not bind or expose a new network port. For RTT logging, the Agent requests the ST-Link, target RAM search range and up-channel; OpenOCD searches the range and streams the selected RTT data to the local reader. The probe is exclusive to RTT while that reader is connected, so it cannot simultaneously serve GDB or a flash operation.
 
 ```bash
 docker run -d --name thub -p 8080:8080 -v thub-data:/var/lib/thub \
@@ -15,6 +15,8 @@ docker run -d --name thub -p 8080:8080 -v thub-data:/var/lib/thub \
 ```
 
 ## Install
+
+The Client requires **Node.js 24 or newer** and npm on its lab host. Install the Node.js 24 release for your Linux distribution (the supported systemd setup below is Linux), then verify `node --version` reports `v24` or newer before installing the package. Node.js downloads and platform installers are at [nodejs.org](https://nodejs.org/en/download).
 
 ```bash
 sudo npm i -g @andrian.yablonskyy/thub-client
