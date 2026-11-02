@@ -1,7 +1,7 @@
 /**
  * @file        packages/client/src/remote-link.js
  * @description Remote board access (README §5.6): while the runner is reserved, a WebSocket to the Coordinator that
- *              serves the developer's channels — a UART through the UartHub, or SWD through an OpenOCD GDB server
+ *              serves the developer's channels — UART, SWD, video, and Client-loopback services
  *
  * @author      Andrian Yablonskyy
  * @copyright   Copyright (c) 2026 Andrian Yablonskyy. All rights reserved.
@@ -263,7 +263,12 @@ class RemoteLink{
       return this._closeChannel(msg.ch, null, { tell: false });
     }
     this._closeChannel(msg.ch, null, { tell: false }); // a reused id: the old one is gone
-    const open = { uart: () => this._openUart(msg), swd: () => this._openSwd(msg), video: () => this._openVideo(msg) }[msg.kind];
+    const open = {
+      uart: () => this._openUart(msg),
+      swd: () => this._openSwd(msg),
+      video: () => this._openVideo(msg),
+      service: () => this._openService(msg)
+    }[msg.kind];
     open().catch((err) => this._closeChannel(msg.ch, err.message));
   }
 
@@ -322,6 +327,49 @@ class RemoteLink{
     });
     this.channels.set(ch, { write: (data) => sub.write(data), close: () => sub.close() });
     this._send({ t: 'opened', ch, kind: 'uart', baudRate: uart.baudRate || 115200 });
+  }
+
+  // A named service is reachable only through loopback on this Client host.
+  async _openService({ ch, name, port }){
+    let closed = false,
+      pending = 0;
+    const sock = net.connect(port, '127.0.0.1'),
+      channel = {
+        write: (data) => sock.write(data),
+        close: () => {
+          closed = true;
+          sock.destroy();
+        }
+      };
+    sock.setNoDelay(true);
+    this.channels.set(ch, channel);
+    sock.on('connect', () => {
+      if (!closed){
+        this._send({ t: 'opened', ch, kind: 'service', name });
+      }
+    });
+    sock.on('data', (data) => {
+      pending += data.length;
+      if (pending > HIGH_WATER){
+        sock.pause();
+      }
+      this._sendData(ch, data, () => {
+        pending -= data.length;
+        if (pending <= HIGH_WATER / 2){
+          sock.resume();
+        }
+      });
+    });
+    sock.on('error', (err) => {
+      if (!closed){
+        this._closeChannel(ch, `localhost:${port}: ${err.message}`);
+      }
+    });
+    sock.on('close', () => {
+      if (!closed && this.channels.get(ch) === channel){
+        this._closeChannel(ch, `${name} (localhost:${port}) closed the connection`);
+      }
+    });
   }
 
   // SWD: an OpenOCD of its own for this GDB connection, gone with it — so a
