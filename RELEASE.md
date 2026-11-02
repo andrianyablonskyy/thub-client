@@ -2,6 +2,12 @@
 
 What changed in each release, newest first. `## Unreleased` collects the changes since the version on npm; `bin/publish` turns that heading into the version and date it releases.
 
+## Unreleased
+
+### Added
+
+- **ST-Link RTT channels:** OpenOCD searches a configured target RAM range for the SEGGER control block and streams the selected up-channel to the Agent. RTT and SWD cannot use the same probe at once.
+
 ## 1.1.27 — 2026-10-15
 
 ### Changed

@@ -60,6 +60,21 @@ function openocdArgs({ serial, target, port }){
   ];
 }
 
+function openocdRttArgs({ serial, target, port, address, size, channel }){
+  return [
+    '-f', 'interface/stlink.cfg',
+    ...(serial ? ['-c', `adapter serial ${serial}`] : []),
+    '-f', `target/${target}.cfg`,
+    '-c', 'bindto 127.0.0.1',
+    '-c', 'gdb_port disabled',
+    '-c', 'telnet_port disabled',
+    '-c', 'tcl_port disabled',
+    '-c', `rtt setup ${address} ${size}`,
+    '-c', 'rtt start',
+    '-c', `rtt server start ${port} ${channel}`
+  ];
+}
+
 function freePort(){
   return new Promise((resolve, reject) => {
     const srv = net.createServer();
@@ -91,6 +106,7 @@ class RemoteLink{
     this.retryTimer = null;
     this.pingTimer = null;
     this.channels = new Map();
+    this.probeUse = new Map();
   }
 
   // From each heartbeat reply: the reservation's id while the runner is
@@ -266,6 +282,7 @@ class RemoteLink{
     const open = {
       uart: () => this._openUart(msg),
       swd: () => this._openSwd(msg),
+      rtt: () => this._openRtt(msg),
       video: () => this._openVideo(msg),
       service: () => this._openService(msg)
     }[msg.kind];
@@ -372,6 +389,109 @@ class RemoteLink{
     });
   }
 
+  async _openOpenOcd({ ch, index, kind, serial, probe, script, port, args }){
+    const active = this.probeUse.get(index) || new Map(),
+      current = [...active.values()].find((use) => use.kind === 'rtt' || kind === 'rtt');
+    if (current){
+      throw new Error(`ST-Link ${index} is already in use by ${current.kind.toUpperCase()}; close that connection before opening ${kind.toUpperCase()}`);
+    }
+    let closed = false,
+      sock = null,
+      proc = null,
+      pending = 0;
+    const tail = [],
+      keep = (buf) => {
+        tail.push(...String(buf).split('\n').filter(Boolean));
+        tail.splice(0, Math.max(0, tail.length - 5));
+      },
+      stopProc = () => {
+        if (proc && proc.exitCode === null && !proc.killed){
+          proc.kill('SIGTERM');
+          setTimeout(() => proc.exitCode === null && proc.kill('SIGKILL'), OPENOCD_KILL_MS).unref?.();
+        }
+      },
+      channel = {
+        write: (data) => kind === 'swd' && sock?.write(data),
+        close: () => {
+          closed = true;
+          sock?.destroy();
+          stopProc();
+          const users = this.probeUse.get(index);
+          users?.delete(ch);
+          if (users?.size === 0){
+            this.probeUse.delete(index);
+          }
+        }
+      };
+    active.set(ch, { ch, kind });
+    this.probeUse.set(index, active);
+    this.channels.set(ch, channel);
+    this._note(ch, `starting OpenOCD: target/${script}.cfg on ST-Link ${serial || probe.path || index}`);
+
+    try {
+      proc = this.spawn(this.openocd, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+      proc.stdout?.on('data', keep);
+      proc.stderr?.on('data', keep);
+      proc.on('error', (err) => {
+        if (!closed){
+          this._closeChannel(ch, err.code === 'ENOENT'
+            ? 'OpenOCD isn\'t installed on this Client host (on Ubuntu: sudo apt install openocd)'
+            : `OpenOCD: ${err.message}`);
+        }
+      });
+      proc.on('exit', (code) => {
+        if (!closed && this.channels.get(ch) === channel){
+          this._closeChannel(ch, `OpenOCD exited (${code}): ${tail.join(' | ') || 'no output'}`);
+        }
+      });
+
+      for (const start = Date.now(); !closed && proc.exitCode === null; await new Promise((resolve) => setTimeout(resolve, 200))){
+        try {
+          sock = await new Promise((resolve, reject) => {
+            const s = net.connect(port, '127.0.0.1', () => resolve(s));
+            s.once('error', reject);
+          });
+          break;
+        }
+        catch {
+          if (Date.now() - start > OPENOCD_READY_MS){
+            const portName = kind === 'rtt' ? 'RTT' : 'GDB';
+            throw new Error(`OpenOCD didn't open its ${portName} port in ${OPENOCD_READY_MS / 1000} s: ` +
+              (tail.join(' | ') || 'no output'));
+          }
+        }
+      }
+      if (!sock){
+        return;
+      }
+      if (closed){
+        return sock.destroy();
+      }
+      sock.on('data', (data) => {
+        pending += data.length;
+        if (pending > HIGH_WATER){
+          sock.pause();
+        }
+        this._sendData(ch, data, () => {
+          pending -= data.length;
+          if (pending <= HIGH_WATER / 2){
+            sock.resume();
+          }
+        });
+      });
+      sock.on('error', () => {});
+      sock.on('close', () => !closed && this.channels.get(ch) === channel &&
+        this._closeChannel(ch, `OpenOCD closed the ${kind === 'rtt' ? 'RTT' : 'GDB'} connection`));
+      this._send({ t: 'opened', ch, kind, target: script, serial });
+    }
+    catch (err){
+      if (this.channels.get(ch) === channel){
+        this._closeChannel(ch, null, { tell: false });
+      }
+      throw err;
+    }
+  }
+
   // SWD: an OpenOCD of its own for this GDB connection, gone with it — so a
   // job can flash the probe while no debugger is attached.
   async _openSwd({ ch, index, target }){
@@ -384,86 +504,29 @@ class RemoteLink{
       throw new Error(`no OpenOCD target for ST-Link ${index}: thub connect --target <name> (e.g. stm32f4x), ` +
         'or set openocdTarget on the probe in the Client\'s config');
     }
-    let closed = false,
-      sock = null,
-      pending = 0;
     const serial = probe.serial || (probe.path ? await this.serialOf(probe.path) : null),
       port = await freePort(),
-      args = openocdArgs({ serial, target: script, port }),
-      proc = this.spawn(this.openocd, args, { stdio: ['ignore', 'pipe', 'pipe'] }),
-      tail = [],
-      keep = (buf) => {
-        tail.push(...String(buf).split('\n').filter(Boolean));
-        tail.splice(0, Math.max(0, tail.length - 5));
-      },
-      stopProc = () => {
-        if (proc.exitCode === null && !proc.killed){
-          proc.kill('SIGTERM');
-          setTimeout(() => proc.exitCode === null && proc.kill('SIGKILL'), OPENOCD_KILL_MS).unref?.();
-        }
-      },
-      channel = {
-        write: (data) => sock?.write(data),
-        close: () => {
-          closed = true;
-          sock?.destroy();
-          stopProc();
-        }
-      };
-    this.channels.set(ch, channel);
-    proc.stdout.on('data', keep);
-    proc.stderr.on('data', keep);
-    proc.on('error', (err) => {
-      if (!closed){
-        this._closeChannel(ch, err.code === 'ENOENT'
-          ? 'OpenOCD isn\'t installed on this Client host (on Ubuntu: sudo apt install openocd)'
-          : `OpenOCD: ${err.message}`);
-      }
-    });
-    proc.on('exit', (code) => {
-      if (!closed && this.channels.get(ch) === channel){
-        this._closeChannel(ch, `OpenOCD exited (${code}): ${tail.join(' | ') || 'no output'}`);
-      }
-    });
-    this._note(ch, `starting OpenOCD: target/${script}.cfg on ST-Link ${serial || probe.path || index}`);
+      args = openocdArgs({ serial, target: script, port });
+    return this._openOpenOcd({ ch, index, kind: 'swd', serial, probe, script, port, args });
+  }
 
-    // Wait for its GDB port, then pipe it.
-    for (const start = Date.now(); !closed && proc.exitCode === null; await new Promise((r) => setTimeout(r, 200))){
-      try {
-        sock = await new Promise((resolve, reject) => {
-          const s = net.connect(port, '127.0.0.1', () => resolve(s));
-          s.once('error', reject);
-        });
-        break;
-      }
-      catch {
-        if (Date.now() - start > OPENOCD_READY_MS){
-          throw new Error(`OpenOCD didn't open its GDB port in ${OPENOCD_READY_MS / 1000} s: ${tail.join(' | ') || 'no output'}`);
-        }
-      }
+  // RTT: a dedicated OpenOCD server reads the configured target RAM range
+  // and streams one SEGGER RTT up-channel as UTF-8 bytes.
+  async _openRtt({ ch, index, target, address, size, channel }){
+    const probe = (this.hw.stlinks || [])[index - 1];
+    if (!probe){
+      throw new Error(`this Client has no ST-Link ${index}`);
     }
-    if (!sock){
-      return;
+    const script = target || probe.openocdTarget;
+    if (!script || !OPENOCD_TARGET_RE.test(script)){
+      throw new Error(`no OpenOCD target for ST-Link ${index}: thub connect --target <name> (e.g. stm32f4x), ` +
+        'or set openocdTarget on the probe in the Client\'s config');
     }
-    if (closed){
-      return sock.destroy();
-    }
-    sock.on('data', (data) => {
-      pending += data.length;
-      if (pending > HIGH_WATER){
-        sock.pause();
-      }
-      this._sendData(ch, data, () => {
-        pending -= data.length;
-        if (pending <= HIGH_WATER / 2){
-          sock.resume();
-        }
-      });
-    });
-    sock.on('error', () => {});
-    sock.on('close', () => !closed && this.channels.get(ch) === channel && this._closeChannel(ch, 'OpenOCD closed the GDB connection'));
-    this._send({ t: 'opened', ch, kind: 'swd', target: script, serial });
+    const serial = probe.serial || (probe.path ? await this.serialOf(probe.path) : null),
+      port = await freePort(),
+      args = openocdRttArgs({ serial, target: script, port, address, size, channel });
+    return this._openOpenOcd({ ch, index, kind: 'rtt', serial, probe, script, port, args });
   }
 }
 
-module.exports = { RemoteLink, openocdArgs, udevSerial };
+module.exports = { RemoteLink, openocdArgs, openocdRttArgs, udevSerial };
