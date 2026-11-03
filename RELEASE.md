@@ -2,6 +2,12 @@
 
 What changed in each release, newest first. `## Unreleased` collects the changes since the version on npm; `bin/publish` turns that heading into the version and date it releases.
 
+## Unreleased
+
+### Fixed
+
+- **RTT and SWD open the selected ST-Link.** When udev omits `ID_SERIAL_SHORT` for an ST-Link V2's binary USB serial, the Client now recovers it from sysfs. It refuses to open the default probe if several ST-Links are configured and the requested one cannot be identified.
+
 ## 1.1.30 — 2026-11-03
 
 ### Changed

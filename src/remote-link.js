@@ -16,6 +16,7 @@
 
 const net = require('node:net'),
   path = require('node:path'),
+  fs = require('node:fs/promises'),
   { spawn: spawnProcess, execFile } = require('node:child_process'),
   { CameraStream } = require('./camera'),
   { decodeData, dataMessages, parseControl, agentControl, remoteUrl, backoffMs, OPENOCD_TARGET_RE, REMOTE_CLOSE
@@ -35,15 +36,44 @@ const PING_TIMEOUT_MS = 75_000,
   // a slow viewer must never hold up the UARTs and GDB on the same link.
   VIDEO_DROP = 2 * 1024 * 1024;
 
-// The probe's USB serial number from its udev device (ID_SERIAL_SHORT) —
-// what tells OpenOCD which ST-Link to open when the host has several.
-function udevSerial(devPath, { run = execFile } = {}){
+// Resolve the exact ST-Link serial. Some V2 probes expose their 12-byte
+// binary serial as a Latin-1 USB string, so udev cannot provide ID_SERIAL_SHORT.
+function udevSerial(devPath, { run = execFile, readFile = fs.readFile } = {}){
   return new Promise((resolve) => {
     run('udevadm', ['info', '--query=property', `--name=${devPath}`], { timeout: 5000 }, (err, stdout) => {
-      const m = !err && /^ID_SERIAL_SHORT=([A-Za-z0-9]{1,64})$/m.exec(String(stdout));
-      resolve(m ? m[1] : null);
+      if (err){
+        return resolve(null);
+      }
+      const properties = String(stdout),
+        serial = /^ID_SERIAL_SHORT=([A-Za-z0-9]{1,64})$/m.exec(properties);
+      if (serial){
+        return resolve(serial[1]);
+      }
+      const device = /^DEVPATH=(\/devices\/[^\r\n]+)$/m.exec(properties)?.[1];
+      if (!device || device.split('/').some((part) => part === '.' || part === '..')){
+        return resolve(null);
+      }
+      return readFile(`/sys${device}/serial`, 'utf8').then((value) => {
+        const text = String(value).trim();
+        if (/^[A-Za-z0-9]{1,64}$/.test(text)){
+          return resolve(text);
+        }
+        const bytes = [...text].map((character) => character.codePointAt(0));
+        return resolve(bytes.length >= 6 && bytes.every((byte) => byte <= 0xff)
+          ? bytes.map((byte) => byte.toString(16).padStart(2, '0')).join('').toUpperCase()
+          : null);
+      }).catch(() => resolve(null));
     });
   });
+}
+
+async function probeSerial(probe, probes, index, serialOf){
+  const serial = probe.serial || (probe.path ? await serialOf(probe.path) : null);
+  if (!serial && probes.length > 1){
+    throw new Error(`can't identify ST-Link ${index} (${probe.path || 'no configured path'}); ` +
+      'set its serial in the Client config so OpenOCD opens the correct probe');
+  }
+  return serial;
 }
 
 // The OpenOCD command line for one GDB connection: the ST-Link (by serial),
@@ -496,7 +526,8 @@ class RemoteLink{
   // SWD: an OpenOCD of its own for this GDB connection, gone with it — so a
   // job can flash the probe while no debugger is attached.
   async _openSwd({ ch, index, target }){
-    const probe = (this.hw.stlinks || [])[index - 1];
+    const probes = this.hw.stlinks || [],
+      probe = probes[index - 1];
     if (!probe){
       throw new Error(`this Client has no ST-Link ${index}`);
     }
@@ -505,7 +536,7 @@ class RemoteLink{
       throw new Error(`no OpenOCD target for ST-Link ${index}: thub connect --target <name> (e.g. stm32f4x), ` +
         'or set openocdTarget on the probe in the Client\'s config');
     }
-    const serial = probe.serial || (probe.path ? await this.serialOf(probe.path) : null),
+    const serial = await probeSerial(probe, probes, index, this.serialOf),
       port = await freePort(),
       args = openocdArgs({ serial, target: script, port });
     return this._openOpenOcd({ ch, index, kind: 'swd', serial, probe, script, port, args });
@@ -514,7 +545,8 @@ class RemoteLink{
   // RTT: a dedicated OpenOCD server reads the configured target RAM range
   // and streams one SEGGER RTT up-channel as UTF-8 bytes.
   async _openRtt({ ch, index, target, address, size, channel }){
-    const probe = (this.hw.stlinks || [])[index - 1];
+    const probes = this.hw.stlinks || [],
+      probe = probes[index - 1];
     if (!probe){
       throw new Error(`this Client has no ST-Link ${index}`);
     }
@@ -523,7 +555,7 @@ class RemoteLink{
       throw new Error(`no OpenOCD target for ST-Link ${index}: thub connect --target <name> (e.g. stm32f4x), ` +
         'or set openocdTarget on the probe in the Client\'s config');
     }
-    const serial = probe.serial || (probe.path ? await this.serialOf(probe.path) : null),
+    const serial = await probeSerial(probe, probes, index, this.serialOf),
       port = await freePort(),
       args = openocdRttArgs({ serial, target: script, port, address, size, channel });
     return this._openOpenOcd({ ch, index, kind: 'rtt', serial, probe, script, port, args });
