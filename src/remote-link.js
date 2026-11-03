@@ -69,7 +69,8 @@ function openocdRttArgs({ serial, target, port, address, size, channel }){
     '-c', 'gdb_port disabled',
     '-c', 'telnet_port disabled',
     '-c', 'tcl_port disabled',
-    '-c', `rtt setup ${address} ${size}`,
+    '-c', `rtt setup ${address} ${size} "SEGGER RTT"`,
+    '-c', 'init',
     '-c', 'rtt start',
     '-c', `rtt server start ${port} ${channel}`
   ];

@@ -72,7 +72,8 @@ test('OpenOCD RTT args configure the memory range and selected up-channel', () =
     '-c', 'gdb_port disabled',
     '-c', 'telnet_port disabled',
     '-c', 'tcl_port disabled',
-    '-c', 'rtt setup 0x20000000 0x10000',
+    '-c', 'rtt setup 0x20000000 0x10000 "SEGGER RTT"',
+    '-c', 'init',
     '-c', 'rtt start',
     '-c', 'rtt server start 4321 2'
   ]);
