@@ -2,6 +2,12 @@
 
 What changed in each release, newest first. `## Unreleased` collects the changes since the version on npm; `bin/publish` turns that heading into the version and date it releases.
 
+## 1.1.30 — 2026-11-03
+
+### Changed
+
+- Requires thub-common 2.2.6.
+
 ## 1.1.28 — 2026-11-02
 
 ### Added
